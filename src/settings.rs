@@ -93,9 +93,13 @@ pub struct ClickActions {
     #[serde(default = "default_double_click")]
     pub double_click: WindowAction,
     #[serde(default = "default_right_click")]
-    pub right_click: WindowAction,
+    pub right_click_unfocused: WindowAction,
+    #[serde(default = "default_right_click")]
+    pub right_click_focused: WindowAction,
     #[serde(default = "default_middle_click")]
-    pub middle_click: WindowAction,
+    pub middle_click_unfocused: WindowAction,
+    #[serde(default = "default_middle_click")]
+    pub middle_click_focused: WindowAction,
 }
 
 impl Default for ClickActions {
@@ -104,8 +108,10 @@ impl Default for ClickActions {
             left_click_unfocused: default_left_unfocused(),
             left_click_focused: default_left_focused(),
             double_click: default_double_click(),
-            right_click: default_right_click(),
-            middle_click: default_middle_click(),
+            right_click_unfocused: default_right_click(),
+            right_click_focused: default_right_click(),
+            middle_click_unfocused: default_middle_click(),
+            middle_click_focused: default_middle_click(),
         }
     }
 }

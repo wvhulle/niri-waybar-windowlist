@@ -185,16 +185,23 @@ impl WindowButton {
 
 		let menu_self = self.clone_for_menu();
 		let title_middle = title.clone();
+		let button_ref_middle = self.gtk_button.clone();
 		self.gtk_button.connect_button_press_event(move |_, event| {
+		    let is_currently_focused = button_ref_middle.style_context().has_class("focused");
 		    if event.button() == 2 {
 		        let actions = state_middle.settings().get_click_actions(
 		            app_id_middle.as_deref(),
 		            title_middle.borrow().as_deref()
 		        );
-		        if actions.middle_click == crate::settings::WindowAction::Menu {
+		        let action = if is_currently_focused {
+		            &actions.middle_click_focused
+		        } else {
+		            &actions.middle_click_unfocused
+		        };
+		        if *action == crate::settings::WindowAction::Menu {
 		            menu_self.display_context_menu(window_id);
 		        } else {
-		            Self::execute_action(&state_middle, window_id, &actions.middle_click);
+		            Self::execute_action(&state_middle, window_id, action);
 		        }
 		        gtk::glib::Propagation::Stop
 		    } else if event.button() == 3 {
@@ -202,10 +209,15 @@ impl WindowButton {
 		            app_id_right.as_deref(),
 		            title_middle.borrow().as_deref()
 		        );
-		        if actions.right_click == crate::settings::WindowAction::Menu {
+		        let action = if is_currently_focused {
+		            &actions.right_click_focused
+		        } else {
+		            &actions.right_click_unfocused
+		        };
+		        if *action == crate::settings::WindowAction::Menu {
 		            menu_self.display_context_menu(window_id);
 		        } else {
-		            Self::execute_action(&state_right, window_id, &actions.right_click);
+		            Self::execute_action(&state_right, window_id, action);
 		        }
 		        gtk::glib::Propagation::Stop
 		    } else {
