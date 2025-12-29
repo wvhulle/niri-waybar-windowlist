@@ -340,6 +340,56 @@ impl WindowButton {
                     tracing::warn!(%e, id = window_id, "focus workspace previous failed");
                 }
             }
+            WindowAction::MoveColumnLeft => {
+                if let Err(e) = state.compositor().move_column_left(window_id) {
+                    tracing::warn!(%e, id = window_id, "move column left failed");
+                }
+            }
+            WindowAction::MoveColumnRight => {
+                if let Err(e) = state.compositor().move_column_right(window_id) {
+                    tracing::warn!(%e, id = window_id, "move column right failed");
+                }
+            }
+            WindowAction::MoveColumnToFirst => {
+                if let Err(e) = state.compositor().move_column_to_first(window_id) {
+                    tracing::warn!(%e, id = window_id, "move column to first failed");
+                }
+            }
+            WindowAction::MoveColumnToLast => {
+                if let Err(e) = state.compositor().move_column_to_last(window_id) {
+                    tracing::warn!(%e, id = window_id, "move column to last failed");
+                }
+            }
+            WindowAction::MoveWindowDown => {
+                if let Err(e) = state.compositor().move_window_down(window_id) {
+                    tracing::warn!(%e, id = window_id, "move window down failed");
+                }
+            }
+            WindowAction::MoveWindowUp => {
+                if let Err(e) = state.compositor().move_window_up(window_id) {
+                    tracing::warn!(%e, id = window_id, "move window up failed");
+                }
+            }
+            WindowAction::MoveWindowDownOrToWorkspaceDown => {
+                if let Err(e) = state.compositor().move_window_down_or_to_workspace_down(window_id) {
+                    tracing::warn!(%e, id = window_id, "move window down or to workspace down failed");
+                }
+            }
+            WindowAction::MoveWindowUpOrToWorkspaceUp => {
+                if let Err(e) = state.compositor().move_window_up_or_to_workspace_up(window_id) {
+                    tracing::warn!(%e, id = window_id, "move window up or to workspace up failed");
+                }
+            }
+            WindowAction::MoveColumnLeftOrToMonitorLeft => {
+                if let Err(e) = state.compositor().move_column_left_or_to_monitor_left(window_id) {
+                    tracing::warn!(%e, id = window_id, "move column left or to monitor left failed");
+                }
+            }
+            WindowAction::MoveColumnRightOrToMonitorRight => {
+                if let Err(e) = state.compositor().move_column_right_or_to_monitor_right(window_id) {
+                    tracing::warn!(%e, id = window_id, "move column right or to monitor right failed");
+                }
+            }
             WindowAction::Menu => {}
         }
     }

@@ -161,6 +161,76 @@ impl CompositorClient {
         validate_handled(response)
     }
 
+    #[tracing::instrument(level = "TRACE", err)]
+    pub fn move_column_left(&self, window_id: u64) -> Result<(), ModuleError> {
+        self.focus_window(window_id)?;
+        let response = send_request(Request::Action(Action::MoveColumnLeft {}))?;
+        validate_handled(response)
+    }
+
+    #[tracing::instrument(level = "TRACE", err)]
+    pub fn move_column_right(&self, window_id: u64) -> Result<(), ModuleError> {
+        self.focus_window(window_id)?;
+        let response = send_request(Request::Action(Action::MoveColumnRight {}))?;
+        validate_handled(response)
+    }
+
+    #[tracing::instrument(level = "TRACE", err)]
+    pub fn move_column_to_first(&self, window_id: u64) -> Result<(), ModuleError> {
+        self.focus_window(window_id)?;
+        let response = send_request(Request::Action(Action::MoveColumnToFirst {}))?;
+        validate_handled(response)
+    }
+
+    #[tracing::instrument(level = "TRACE", err)]
+    pub fn move_column_to_last(&self, window_id: u64) -> Result<(), ModuleError> {
+        self.focus_window(window_id)?;
+        let response = send_request(Request::Action(Action::MoveColumnToLast {}))?;
+        validate_handled(response)
+    }
+
+    #[tracing::instrument(level = "TRACE", err)]
+    pub fn move_window_down(&self, window_id: u64) -> Result<(), ModuleError> {
+        self.focus_window(window_id)?;
+        let response = send_request(Request::Action(Action::MoveWindowDown {}))?;
+        validate_handled(response)
+    }
+
+    #[tracing::instrument(level = "TRACE", err)]
+    pub fn move_window_up(&self, window_id: u64) -> Result<(), ModuleError> {
+        self.focus_window(window_id)?;
+        let response = send_request(Request::Action(Action::MoveWindowUp {}))?;
+        validate_handled(response)
+    }
+
+    #[tracing::instrument(level = "TRACE", err)]
+    pub fn move_window_down_or_to_workspace_down(&self, window_id: u64) -> Result<(), ModuleError> {
+        self.focus_window(window_id)?;
+        let response = send_request(Request::Action(Action::MoveWindowDownOrToWorkspaceDown {}))?;
+        validate_handled(response)
+    }
+
+    #[tracing::instrument(level = "TRACE", err)]
+    pub fn move_window_up_or_to_workspace_up(&self, window_id: u64) -> Result<(), ModuleError> {
+        self.focus_window(window_id)?;
+        let response = send_request(Request::Action(Action::MoveWindowUpOrToWorkspaceUp {}))?;
+        validate_handled(response)
+    }
+
+    #[tracing::instrument(level = "TRACE", err)]
+    pub fn move_column_left_or_to_monitor_left(&self, window_id: u64) -> Result<(), ModuleError> {
+        self.focus_window(window_id)?;
+        let response = send_request(Request::Action(Action::MoveColumnLeftOrToMonitorLeft {}))?;
+        validate_handled(response)
+    }
+
+    #[tracing::instrument(level = "TRACE", err)]
+    pub fn move_column_right_or_to_monitor_right(&self, window_id: u64) -> Result<(), ModuleError> {
+        self.focus_window(window_id)?;
+        let response = send_request(Request::Action(Action::MoveColumnRightOrToMonitorRight {}))?;
+        validate_handled(response)
+    }
+
     pub fn query_outputs(&self) -> Result<HashMap<String, Output>, ModuleError> {
         let response = send_request(Request::Outputs)?;
         match response {

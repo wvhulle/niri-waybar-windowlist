@@ -142,6 +142,16 @@ pub enum WindowAction {
     MoveWindowToMonitorRight,
     ToggleColumnTabbedDisplay,
     FocusWorkspacePrevious,
+    MoveColumnLeft,
+    MoveColumnRight,
+    MoveColumnToFirst,
+    MoveColumnToLast,
+    MoveWindowDown,
+    MoveWindowUp,
+    MoveWindowDownOrToWorkspaceDown,
+    MoveWindowUpOrToWorkspaceUp,
+    MoveColumnLeftOrToMonitorLeft,
+    MoveColumnRightOrToMonitorRight,
     Menu,
 }
 
