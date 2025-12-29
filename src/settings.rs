@@ -100,6 +100,10 @@ pub struct ClickActions {
     pub middle_click_unfocused: WindowAction,
     #[serde(default = "default_middle_click")]
     pub middle_click_focused: WindowAction,
+    #[serde(default = "default_none")]
+    pub scroll_up: WindowAction,
+    #[serde(default = "default_none")]
+    pub scroll_down: WindowAction,
 }
 
 impl Default for ClickActions {
@@ -112,6 +116,8 @@ impl Default for ClickActions {
             right_click_focused: default_right_click(),
             middle_click_unfocused: default_middle_click(),
             middle_click_focused: default_middle_click(),
+            scroll_up: default_none(),
+            scroll_down: default_none(),
         }
     }
 }
@@ -200,6 +206,7 @@ fn default_max_taskbar() -> i32 { 1200 }
 fn default_scroll_arrow_left() -> String { "◀".to_string() }
 fn default_scroll_arrow_right() -> String { "▶".to_string() }
 
+fn default_none() -> WindowAction { WindowAction::None }
 fn default_left_unfocused() -> WindowAction { WindowAction::FocusWindow }
 fn default_left_focused() -> WindowAction { WindowAction::MaximizeColumn }
 fn default_double_click() -> WindowAction { WindowAction::MaximizeWindowToEdges }

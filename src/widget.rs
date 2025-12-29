@@ -57,6 +57,7 @@ impl WindowButton {
         gtk_button.set_always_show_image(true);
         gtk_button.set_relief(ReliefStyle::None);
         gtk_button.add(&layout_box);
+        gtk_button.add_events(gtk::gdk::EventMask::SCROLL_MASK);
 
         let max_width = state.settings().max_button_width(None);
         gtk_button.set_size_request(max_width, -1);
@@ -219,6 +220,31 @@ impl WindowButton {
 		        } else {
 		            Self::execute_action(&state_right, window_id, action);
 		        }
+		        gtk::glib::Propagation::Stop
+		    } else {
+		        gtk::glib::Propagation::Proceed
+		    }
+		});
+
+		let state_scroll = self.state.clone();
+		let app_id_scroll = self.app_id.clone();
+		let title_scroll = title.clone();
+		self.gtk_button.connect_scroll_event(move |_, event| {
+		    use waybar_cffi::gtk::gdk::ScrollDirection;
+
+		    let actions = state_scroll.settings().get_click_actions(
+		        app_id_scroll.as_deref(),
+		        title_scroll.borrow().as_deref()
+		    );
+
+		    let action = match event.direction() {
+		        ScrollDirection::Up => &actions.scroll_up,
+		        ScrollDirection::Down => &actions.scroll_down,
+		        _ => return gtk::glib::Propagation::Proceed,
+		    };
+
+		    if *action != crate::settings::WindowAction::None {
+		        Self::execute_action(&state_scroll, window_id, action);
 		        gtk::glib::Propagation::Stop
 		    } else {
 		        gtk::glib::Propagation::Proceed
