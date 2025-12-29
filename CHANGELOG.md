@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2025-12-29
+
+### Added
+- Multi-select windows with modifier key (Ctrl by default)
+  - Configurable modifier via `multi_select_modifier` (ctrl, shift, alt, super)
+  - Customizable multi-select context menu via `multi_select_menu`
+  - Batch actions: close-windows, move-to-workspace-up/down, toggle-floating, fullscreen-windows
+  - Custom scripts support with `{window_ids}` placeholder
+- Separate click actions for focused vs unfocused windows:
+  - `right_click_focused` / `right_click_unfocused`
+  - `middle_click_focused` / `middle_click_unfocused`
+- Scroll wheel actions (`scroll_up` / `scroll_down`)
+- Custom shell commands in context menu items via `command` field
+- 10 new window movement actions:
+  - `move-column-left` / `move-column-right`
+  - `move-column-to-first` / `move-column-to-last`
+  - `move-window-up` / `move-window-down`
+  - `move-window-up-or-to-workspace-up` / `move-window-down-or-to-workspace-down`
+  - `move-column-left-or-to-monitor-left` / `move-column-right-or-to-monitor-right`
+
+### Changed
+- Multi-select now requires user to be in the `input` group for modifier key detection on Wayland
+- Selection clears automatically when window focus changes
+- Click action config fields renamed for clarity (e.g., `right_click` split into `right_click_focused`/`right_click_unfocused`)
+
+### Fixed
+- Modifier key detection on Wayland layer-shell surfaces via evdev
+
 ## [0.2.0] - 2025-12-02
 
 ### Added

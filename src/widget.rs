@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::HashSet, fmt::Debug, path::PathBuf, process::Command, rc::Rc, time::{Duration, Instant}};
+use std::{cell::RefCell, collections::HashMap, fmt::Debug, path::PathBuf, process::Command, rc::Rc, time::{Duration, Instant}};
 use waybar_cffi::gtk::{
     self as gtk, CssProvider, IconLookupFlags, IconSize, IconTheme, Menu, MenuItem, Orientation, ReliefStyle,
     gdk_pixbuf::Pixbuf,
@@ -8,10 +8,17 @@ use waybar_cffi::gtk::{
 use crate::global::SharedState;
 use crate::settings::{ModifierKey, MultiSelectAction};
 
-pub type SelectionState = Rc<RefCell<HashSet<u64>>>;
+pub type SelectionState = Rc<RefCell<HashMap<u64, gtk::Button>>>;
 
 pub fn create_selection_state() -> SelectionState {
-    Rc::new(RefCell::new(HashSet::new()))
+    Rc::new(RefCell::new(HashMap::new()))
+}
+
+pub fn clear_selection(selection: &SelectionState) {
+    let mut sel = selection.borrow_mut();
+    for (_, button) in sel.drain() {
+        button.style_context().remove_class("selected");
+    }
 }
 
 pub struct WindowButton {
@@ -165,6 +172,9 @@ impl WindowButton {
 		let button_ref = self.gtk_button.clone();
 		let button_ref_select = self.gtk_button.clone();
 		let last_click_time = Rc::new(RefCell::new(Instant::now() - Duration::from_secs(1)));
+		let skip_clicked = Rc::new(RefCell::new(false));
+		let skip_clicked_press = skip_clicked.clone();
+		let skip_clicked_click = skip_clicked.clone();
 		let app_id = self.app_id.clone();
 		let app_id_middle = self.app_id.clone();
 		let app_id_right = self.app_id.clone();
@@ -175,6 +185,11 @@ impl WindowButton {
 		let title_clone = title.clone();
 		let selection_left = selection.clone();
 		self.gtk_button.connect_clicked(move |_| {
+		    if *skip_clicked_click.borrow() {
+		        *skip_clicked_click.borrow_mut() = false;
+		        return;
+		    }
+
 		    let is_currently_focused = button_ref.style_context().has_class("focused");
 		    let actions = state.settings().get_click_actions(
 		        app_id.as_deref(),
@@ -187,33 +202,33 @@ impl WindowButton {
 		        let time_since_last = now.duration_since(*last_click);
 
 		        if time_since_last < Duration::from_millis(300) {
-		            selection_left.borrow_mut().clear();
+		            clear_selection(&selection_left);
 		            Self::execute_action(&state, window_id, &actions.double_click);
 		            *last_click = Instant::now() - Duration::from_secs(1);
 		        } else {
-		            selection_left.borrow_mut().clear();
+		            clear_selection(&selection_left);
 		            Self::execute_action(&state, window_id, &actions.left_click_focused);
 		            *last_click = now;
 		        }
 		    } else {
-		        selection_left.borrow_mut().clear();
+		        clear_selection(&selection_left);
 		        Self::execute_action(&state, window_id, &actions.left_click_unfocused);
 		    }
 		});
 
-		self.gtk_button.connect_button_press_event(move |_, event| {
+		self.gtk_button.connect_button_press_event(move |btn, event| {
 		    if event.button() == 1 {
-		        let modifier_held = Self::check_modifier(event.state(), state_select.settings().multi_select_modifier());
+		        let modifier_held = Self::check_modifier(btn, state_select.settings().multi_select_modifier());
 		        if modifier_held {
+		            *skip_clicked_press.borrow_mut() = true;
 		            let mut sel = selection.borrow_mut();
-		            if sel.contains(&window_id) {
+		            if sel.contains_key(&window_id) {
 		                sel.remove(&window_id);
 		                button_ref_select.style_context().remove_class("selected");
 		            } else {
-		                sel.insert(window_id);
+		                sel.insert(window_id, button_ref_select.clone());
 		                button_ref_select.style_context().add_class("selected");
 		            }
-		            return gtk::glib::Propagation::Stop;
 		        }
 		    }
 		    gtk::glib::Propagation::Proceed
@@ -502,13 +517,33 @@ impl WindowButton {
 		});
 	}
 
-	fn check_modifier(event_state: gtk::gdk::ModifierType, modifier: ModifierKey) -> bool {
-		match modifier {
-		    ModifierKey::Ctrl => event_state.contains(gtk::gdk::ModifierType::CONTROL_MASK),
-		    ModifierKey::Shift => event_state.contains(gtk::gdk::ModifierType::SHIFT_MASK),
-		    ModifierKey::Alt => event_state.contains(gtk::gdk::ModifierType::MOD1_MASK),
-		    ModifierKey::Super => event_state.contains(gtk::gdk::ModifierType::SUPER_MASK),
-		}
+	fn check_modifier(_button: &gtk::Button, modifier: ModifierKey) -> bool {
+		use evdev::Key;
+
+		let keys_to_check: &[Key] = match modifier {
+		    ModifierKey::Ctrl => &[Key::KEY_LEFTCTRL, Key::KEY_RIGHTCTRL],
+		    ModifierKey::Shift => &[Key::KEY_LEFTSHIFT, Key::KEY_RIGHTSHIFT],
+		    ModifierKey::Alt => &[Key::KEY_LEFTALT, Key::KEY_RIGHTALT],
+		    ModifierKey::Super => &[Key::KEY_LEFTMETA, Key::KEY_RIGHTMETA],
+		};
+
+		let result = evdev::enumerate()
+		    .filter_map(|(_, device)| {
+		        if device.supported_keys().map_or(false, |keys| keys.contains(Key::KEY_LEFTCTRL)) {
+		            Some(device)
+		        } else {
+		            None
+		        }
+		    })
+		    .any(|device| {
+		        if let Ok(key_state) = device.get_key_state() {
+		            keys_to_check.iter().any(|&key| key_state.contains(key))
+		        } else {
+		            false
+		        }
+		    });
+
+		result
 	}
 
 	fn display_multi_select_menu(&self) {
@@ -516,7 +551,7 @@ impl WindowButton {
 		menu.set_reserve_toggle_size(false);
 
 		let menu_items = self.state.settings().multi_select_menu();
-		let selected_windows: Vec<u64> = self.selection.borrow().iter().copied().collect();
+		let selected_windows: Vec<u64> = self.selection.borrow().keys().copied().collect();
 
 		for menu_item in menu_items {
 		    let item = MenuItem::with_label(&menu_item.label);
@@ -539,7 +574,7 @@ impl WindowButton {
 		        } else if let Some(ref act) = action {
 		            Self::execute_multi_select_action(&state, &windows, act);
 		        }
-		        selection.borrow_mut().clear();
+		        clear_selection(&selection);
 		    });
 		}
 

@@ -27,7 +27,7 @@ use errors::ModuleError;
 use global::{EventMessage, SharedState};
 use notifications::NotificationData;
 use system::ProcessInfo;
-use widget::{WindowButton, SelectionState, create_selection_state};
+use widget::{WindowButton, SelectionState, create_selection_state, clear_selection};
 
 static LOGGING: LazyLock<()> = LazyLock::new(|| {
     if let Err(e) = tracing_subscriber::fmt()
@@ -233,6 +233,7 @@ struct ModuleInstance {
     main_container: gtk::Box,
     previous_snapshot: Option<WindowSnapshot>,
     current_output: Option<String>,
+    previous_focused: Option<u64>,
     state: SharedState,
     selection: SelectionState,
 }
@@ -246,6 +247,7 @@ impl ModuleInstance {
             main_container,
             previous_snapshot: None,
             current_output: None,
+            previous_focused: None,
             state,
             selection: create_selection_state(),
         }
@@ -472,6 +474,12 @@ impl ModuleInstance {
         filter: Arc<Mutex<screen::DisplayFilter>>,
     ) {
         self.update_output_and_resize().await;
+
+        let current_focused = snapshot.iter().find(|w| w.is_focused).map(|w| w.id);
+        if current_focused != self.previous_focused {
+            clear_selection(&self.selection);
+            self.previous_focused = current_focused;
+        }
 
         let mut removed_windows = self.buttons.keys().copied().collect::<BTreeSet<_>>();
         let config = self.state.settings();

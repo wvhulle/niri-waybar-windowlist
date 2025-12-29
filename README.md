@@ -80,9 +80,9 @@ The compiled module will be at `target/release/libniri_window_buttons.so`.
     ],
     "multi_select_modifier": "ctrl",
     "multi_select_menu": [
-      {"label": "  Close All", "action": "close-windows"},
-      {"label": "  Move All Up", "action": "move-to-workspace-up"},
-      {"label": "  Move All Down", "action": "move-to-workspace-down"}
+      {"label": "  Move All Up", "action": "move-to-workspace-up"},
+      {"label": "  Move All Down", "action": "move-to-workspace-down"},
+      {"label": "  Close All", "action": "close-windows"}
     ],
     "ignore_rules": [],
     "notifications": {
@@ -97,17 +97,21 @@ The compiled module will be at `target/release/libniri_window_buttons.so`.
 
 ### Display Options
 
-- `show_all_outputs` - Show windows from all monitors (default: `false`)
-- `only_current_workspace` - Show only current workspace windows (default: `false`)
-- `show_window_titles` - Display window titles next to icons (default: `true`)
+| Option | Description | Default |
+|--------|-------------|---------|
+| `show_all_outputs` | Show windows from all monitors | `false` |
+| `only_current_workspace` | Show only current workspace windows | `false` |
+| `show_window_titles` | Display window titles next to icons | `true` |
 
 ### Size Controls
 
-- `min_button_width` - Minimum button width in pixels (default: `150`)
-- `max_button_width` - Maximum button width in pixels (default: `235`)
-- `max_taskbar_width` - Total taskbar width limit in pixels (default: `1200`)
-- `icon_size` - Icon dimensions in pixels (default: `24`)
-- `icon_spacing` - Space between icon and title in pixels (default: `6`)
+| Option | Description | Default |
+|--------|-------------|---------|
+| `min_button_width` | Minimum button width in pixels | `150` |
+| `max_button_width` | Maximum button width in pixels | `235` |
+| `max_taskbar_width` | Total taskbar width limit in pixels | `1200` |
+| `icon_size` | Icon dimensions in pixels | `24` |
+| `icon_spacing` | Space between icon and title in pixels | `6` |
 
 #### Per-Output Width Configuration
 
@@ -181,40 +185,50 @@ Configure what happens when you click buttons. All click types can be assigned a
 ```
 
 **Available actions:**
-- `"none"`
-- `"menu"`
-- `"focus-window"`
-- `"close-window"`
-- `"maximize-column"`
-- `"maximize-window-to-edges"`
-- `"center-column"`
-- `"center-window"`
-- `"center-visible-columns"`
-- `"expand-column-to-available-width"`
-- `"fullscreen-window"`
-- `"toggle-windowed-fullscreen"`
-- `"toggle-window-floating"`
-- `"consume-window-into-column"`
-- `"expel-window-from-column"`
-- `"reset-window-height"`
-- `"switch-preset-column-width"`
-- `"switch-preset-window-height"`
-- `"move-column-left"`
-- `"move-column-right"`
-- `"move-column-to-first"`
-- `"move-column-to-last"`
-- `"move-window-up"`
-- `"move-window-down"`
-- `"move-window-up-or-to-workspace-up"`
-- `"move-window-down-or-to-workspace-down"`
-- `"move-window-to-workspace-up"`
-- `"move-window-to-workspace-down"`
-- `"move-window-to-monitor-left"`
-- `"move-window-to-monitor-right"`
-- `"move-column-left-or-to-monitor-left"`
-- `"move-column-right-or-to-monitor-right"`
-- `"toggle-column-tabbed-display"`
-- `"focus-workspace-previous"`
+
+| Action | Description |
+|--------|-------------|
+| `none` | Do nothing |
+| `menu` | Show context menu |
+| `focus-window` | Focus the window |
+| `close-window` | Close the window |
+| **Column/Window Sizing** | |
+| `maximize-column` | Maximize column width |
+| `maximize-window-to-edges` | Maximize window to screen edges |
+| `expand-column-to-available-width` | Expand column to fill available space |
+| `reset-window-height` | Reset window to default height |
+| `switch-preset-column-width` | Cycle through preset column widths |
+| `switch-preset-window-height` | Cycle through preset window heights |
+| **Centering** | |
+| `center-column` | Center column on screen |
+| `center-window` | Center window on screen |
+| `center-visible-columns` | Center all visible columns |
+| **Fullscreen/Floating** | |
+| `fullscreen-window` | Toggle fullscreen |
+| `toggle-windowed-fullscreen` | Toggle windowed fullscreen |
+| `toggle-window-floating` | Toggle floating mode |
+| **Column Stacking** | |
+| `consume-window-into-column` | Stack window into adjacent column |
+| `expel-window-from-column` | Unstack window from column |
+| `toggle-column-tabbed-display` | Toggle tabbed display mode |
+| **Movement** | |
+| `move-column-left` | Move column left |
+| `move-column-right` | Move column right |
+| `move-column-to-first` | Move column to first position |
+| `move-column-to-last` | Move column to last position |
+| `move-window-up` | Move window up in column |
+| `move-window-down` | Move window down in column |
+| **Workspace/Monitor Movement** | |
+| `move-window-to-workspace-up` | Move window to workspace above |
+| `move-window-to-workspace-down` | Move window to workspace below |
+| `move-window-up-or-to-workspace-up` | Move up, or to workspace above if at top |
+| `move-window-down-or-to-workspace-down` | Move down, or to workspace below if at bottom |
+| `move-window-to-monitor-left` | Move window to left monitor |
+| `move-window-to-monitor-right` | Move window to right monitor |
+| `move-column-left-or-to-monitor-left` | Move column left, or to left monitor |
+| `move-column-right-or-to-monitor-right` | Move column right, or to right monitor |
+| **Focus** | |
+| `focus-workspace-previous` | Focus previously active workspace |
 
 ### Context Menu
 
@@ -247,26 +261,40 @@ Select multiple windows using a modifier key, then perform batch actions via rig
 {
   "multi_select_modifier": "ctrl",
   "multi_select_menu": [
-    {"label": "  Close All", "action": "close-windows"},
-    {"label": "  Move All Up", "action": "move-to-workspace-up"},
-    {"label": "  Move All Down", "action": "move-to-workspace-down"},
+    {"label": "  Close All", "action": "close-windows"},
+    {"label": "  Move All Up", "action": "move-to-workspace-up"},
+    {"label": "  Move All Down", "action": "move-to-workspace-down"},
     {"label": "󰉩  Float All", "action": "toggle-floating"},
-    {"label": "  Fullscreen All", "action": "fullscreen-windows"},
-    {"label": "  Custom Script", "command": "my-script.sh {window_ids}"}
+    {"label": "  Fullscreen All", "action": "fullscreen-windows"},
+    {"label": "󱆃  Custom Script", "command": "my-script.sh {window_ids}"}
   ]
 }
 ```
 
 **Modifier options:** `ctrl`, `shift`, `alt`, `super`
 
-**Multi-select actions:** `close-windows`, `move-to-workspace-up`, `move-to-workspace-down`, `toggle-floating`, `fullscreen-windows`
+**Multi-select actions:**
+
+| Action | Description |
+|--------|-------------|
+| `close-windows` | Close all selected windows |
+| `move-to-workspace-up` | Move all to workspace above |
+| `move-to-workspace-down` | Move all to workspace below |
+| `toggle-floating` | Toggle floating on all |
+| `fullscreen-windows` | Fullscreen all selected |
 
 **Usage:**
 - Hold modifier + left-click to select/deselect windows
 - Right-click with selections to show multi-select menu
-- Left-click without modifier clears selection
+- Click any window (or window button without modifier) clears selection
 
 Custom commands receive `{window_ids}` as a comma-separated list of window IDs.
+
+**Requirements:** User must be in the `input` group for modifier key detection on Wayland:
+```bash
+sudo usermod -aG input $USER
+# Log out and back in for changes to take effect
+```
 
 ### Per-App Configuration
 
@@ -280,7 +308,8 @@ Override click actions and add CSS classes based on app ID and window title patt
       "class": "pip",
       "click_actions": {
         "left_click_focused": "toggle-window-floating",
-        "middle_click": "close-window"
+        "middle_click_focused": "close-window",
+        "middle_click_unfocused": "close-window"
       }
     },
     {
@@ -321,13 +350,16 @@ Hide specific windows from the taskbar using flexible matching rules:
 ```
 
 **Available matchers:**
-- `"app_id"` - Exact app ID match
-- `"title"` - Exact window title match
-- `"title_contains"` - Partial title match (substring)
-- `"title_regex"` - Regex pattern against title
-- `"workspace"` - Hide all windows on specific workspace number
 
-All matchers in a single rule must match for the window to be ignored. Use multiple rules for OR logic.
+| Matcher | Description |
+|---------|-------------|
+| `app_id` | Exact app ID match |
+| `title` | Exact window title match |
+| `title_contains` | Partial title match (substring) |
+| `title_regex` | Regex pattern against title |
+| `workspace` | Hide all windows on specific workspace number |
+
+All matchers in a single rule must match (AND logic). Use multiple rules for OR logic.
 
 ### Notifications
 
@@ -344,22 +376,27 @@ Enable urgency hints when applications request attention:
 }
 ```
 
-- `enabled` - Enable notification monitoring (default: `true`)
-- `use_desktop_entry` - Match via desktop entry if PID lookup fails (default: `true`)
-- `use_fuzzy_matching` - Case-insensitive/partial app ID matching (default: `false`)
-- `map_app_ids` - Translate notification app IDs to window app IDs (default: `{}`)
+| Option | Description | Default |
+|--------|-------------|---------|
+| `enabled` | Enable notification monitoring | `true` |
+| `use_desktop_entry` | Match via desktop entry if PID lookup fails | `true` |
+| `use_fuzzy_matching` | Case-insensitive/partial app ID matching | `false` |
+| `map_app_ids` | Translate notification app IDs to window app IDs | `{}` |
 
 ## Styling
 
 Customize appearance using Waybar's GTK CSS. The module container uses class `.niri_window_buttons` and contains `button` elements.
 
 **Available CSS Classes:**
-- `.focused` - Currently focused window
-- `.selected` - Multi-selected window
-- `.urgent` - Window with pending notification
-- `.dragging` - Window being dragged
-- `.drag-over` - Valid drop target during drag
-- Custom classes from `apps` configuration
+
+| Class | Description |
+|-------|-------------|
+| `.focused` | Currently focused window |
+| `.selected` | Multi-selected window |
+| `.urgent` | Window with pending notification |
+| `.dragging` | Window being dragged |
+| `.drag-over` | Valid drop target during drag |
+| Custom | Classes from `apps` configuration |
 
 **Example:**
 
