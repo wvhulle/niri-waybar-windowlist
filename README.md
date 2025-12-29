@@ -7,12 +7,14 @@ A Waybar module for displaying and managing traditional window buttons in the Ni
 ## Features
 
 - Window buttons with application icons and optional title text
-- Fully configurable click actions (left, right, middle, double-click)
-- Configurable context menu
+- Fully configurable click actions (left, right, middle, double-click, scroll wheel)
+- Separate actions for focused vs unfocused windows
+- Context menu with custom scripts support
+- Multi-select windows with modifier keys
 - Per-application click behavior and styling via regex title matching
 - Advanced window filtering (by app, title, workspace)
 - Drag and drop window reordering
-- Dynamic button sizing with taskbar width limits and scroll overflow.
+- Dynamic button sizing with taskbar width limits and scroll overflow
 - Multi-monitor support
 - Notification integration with urgency hints
 - Custom CSS classes via pattern matching
@@ -63,14 +65,24 @@ The compiled module will be at `target/release/libniri_window_buttons.so`.
       "left_click_unfocused": "focus-window",
       "left_click_focused": "maximize-column",
       "double_click": "maximize-window-to-edges",
-      "right_click": "menu",
-      "middle_click": "close-window"
+      "right_click_unfocused": "menu",
+      "right_click_focused": "menu",
+      "middle_click_unfocused": "close-window",
+      "middle_click_focused": "close-window",
+      "scroll_up": "none",
+      "scroll_down": "none"
     },
     "context_menu": [
       {"label": "  Maximize Column", "action": "maximize-column"},
       {"label": "  Maximize to Edges", "action": "maximize-window-to-edges"},
       {"label": "󰉩  Toggle Floating", "action": "toggle-window-floating"},
       {"label": "  Close Window", "action": "close-window"}
+    ],
+    "multi_select_modifier": "ctrl",
+    "multi_select_menu": [
+      {"label": "  Close All", "action": "close-windows"},
+      {"label": "  Move All Up", "action": "move-to-workspace-up"},
+      {"label": "  Move All Down", "action": "move-to-workspace-down"}
     ],
     "ignore_rules": [],
     "notifications": {
@@ -152,15 +164,19 @@ Defaults are `"◀"` and `"▶"`. You can use any unicode characters, emoji, or 
 
 ### Click Actions
 
-Configure what happens when you click buttons. All click types can be assigned any action, including the context menu:
+Configure what happens when you click buttons. All click types can be assigned any action, including the context menu. Right-click and middle-click support separate actions for focused vs unfocused windows:
 
 ```jsonc
 "click_actions": {
   "left_click_unfocused": "focus-window",
   "left_click_focused": "maximize-column",
   "double_click": "maximize-window-to-edges",
-  "right_click": "menu",
-  "middle_click": "close-window"
+  "right_click_unfocused": "menu",
+  "right_click_focused": "menu",
+  "middle_click_unfocused": "focus-window",
+  "middle_click_focused": "close-window",
+  "scroll_up": "move-column-left",
+  "scroll_down": "move-column-right"
 }
 ```
 
@@ -183,10 +199,20 @@ Configure what happens when you click buttons. All click types can be assigned a
 - `"reset-window-height"`
 - `"switch-preset-column-width"`
 - `"switch-preset-window-height"`
+- `"move-column-left"`
+- `"move-column-right"`
+- `"move-column-to-first"`
+- `"move-column-to-last"`
+- `"move-window-up"`
+- `"move-window-down"`
+- `"move-window-up-or-to-workspace-up"`
+- `"move-window-down-or-to-workspace-down"`
 - `"move-window-to-workspace-up"`
 - `"move-window-to-workspace-down"`
 - `"move-window-to-monitor-left"`
 - `"move-window-to-monitor-right"`
+- `"move-column-left-or-to-monitor-left"`
+- `"move-column-right-or-to-monitor-right"`
 - `"toggle-column-tabbed-display"`
 - `"focus-workspace-previous"`
 
@@ -204,7 +230,43 @@ Customize which actions appear in the context menu and their order:
 ]
 ```
 
+Menu items can also run custom shell commands with placeholders:
+- `{window_id}` - Window ID
+- `{app_id}` - Application ID
+- `{title}` - Window title
+
+Example: `{"label": "  Run Script", "command": "notify-send 'Window: {app_id}'"}`
+
 The menu can be triggered via any click action by setting it to `"menu"`.
+
+### Multi-Select
+
+Select multiple windows using a modifier key, then perform batch actions via right-click menu:
+
+```jsonc
+{
+  "multi_select_modifier": "ctrl",
+  "multi_select_menu": [
+    {"label": "  Close All", "action": "close-windows"},
+    {"label": "  Move All Up", "action": "move-to-workspace-up"},
+    {"label": "  Move All Down", "action": "move-to-workspace-down"},
+    {"label": "󰉩  Float All", "action": "toggle-floating"},
+    {"label": "  Fullscreen All", "action": "fullscreen-windows"},
+    {"label": "  Custom Script", "command": "my-script.sh {window_ids}"}
+  ]
+}
+```
+
+**Modifier options:** `ctrl`, `shift`, `alt`, `super`
+
+**Multi-select actions:** `close-windows`, `move-to-workspace-up`, `move-to-workspace-down`, `toggle-floating`, `fullscreen-windows`
+
+**Usage:**
+- Hold modifier + left-click to select/deselect windows
+- Right-click with selections to show multi-select menu
+- Left-click without modifier clears selection
+
+Custom commands receive `{window_ids}` as a comma-separated list of window IDs.
 
 ### Per-App Configuration
 
@@ -293,6 +355,7 @@ Customize appearance using Waybar's GTK CSS. The module container uses class `.n
 
 **Available CSS Classes:**
 - `.focused` - Currently focused window
+- `.selected` - Multi-selected window
 - `.urgent` - Window with pending notification
 - `.dragging` - Window being dragged
 - `.drag-over` - Valid drop target during drag
@@ -312,6 +375,11 @@ Customize appearance using Waybar's GTK CSS. The module container uses class `.n
   border-bottom: 3px solid #81a1c1;
 }
 
+#cffi\.niri_window_buttons button.selected {
+  background: rgba(136, 192, 208, 0.3);
+  border: 1px dashed #88c0d0;
+}
+
 #cffi\.niri_window_buttons button.urgent {
   background: rgba(191, 97, 106, 0.4);
 }
@@ -329,12 +397,7 @@ Customize appearance using Waybar's GTK CSS. The module container uses class `.n
 ## Wishlist / Future Ideas
 
 - Per-workspace app rules (different click actions per workspace)
-- Scroll wheel actions (scroll-up/scroll-down)
-- Move window actions (move-left, move-right, move-to-workspace)
 - Toggle window title visibility per button
 - Minimize/scratchpad support
 - Window grouping by app
-- Multi-select with modifier keys
-- Right/middle_click_unfocused etc.
 - Stacked tabs support
-- Custom items/scripts in context menu
