@@ -1,4 +1,4 @@
-use std::{cell::RefCell, fmt::Debug, path::PathBuf, rc::Rc, time::{Duration, Instant}};
+use std::{cell::RefCell, collections::HashSet, fmt::Debug, path::PathBuf, process::Command, rc::Rc, time::{Duration, Instant}};
 use waybar_cffi::gtk::{
     self as gtk, CssProvider, IconLookupFlags, IconSize, IconTheme, Menu, MenuItem, Orientation, ReliefStyle,
     gdk_pixbuf::Pixbuf,
@@ -6,6 +6,13 @@ use waybar_cffi::gtk::{
     DestDefaults, TargetEntry, TargetFlags,
 };
 use crate::global::SharedState;
+use crate::settings::{ModifierKey, MultiSelectAction};
+
+pub type SelectionState = Rc<RefCell<HashSet<u64>>>;
+
+pub fn create_selection_state() -> SelectionState {
+    Rc::new(RefCell::new(HashSet::new()))
+}
 
 pub struct WindowButton {
     app_id: Option<String>,
@@ -16,6 +23,7 @@ pub struct WindowButton {
     state: SharedState,
     window_id: u64,
     title: Rc<RefCell<Option<String>>>,
+    selection: SelectionState,
 }
 
 impl Debug for WindowButton {
@@ -42,7 +50,7 @@ thread_local! {
 
 impl WindowButton {
     #[tracing::instrument(level = "TRACE", fields(app_id = &window.app_id))]
-    pub fn create(state: &SharedState, window: &niri_ipc::Window) -> Self {
+    pub fn create(state: &SharedState, window: &niri_ipc::Window, selection: SelectionState) -> Self {
         let state_clone = state.clone();
         let display_titles = state.settings().show_window_titles();
 
@@ -84,6 +92,7 @@ impl WindowButton {
             state: state_clone,
             window_id: window.id,
             title: Rc::new(RefCell::new(window.title.clone())),
+            selection,
         };
 
         button.setup_click_handlers(window.id);
@@ -150,16 +159,21 @@ impl WindowButton {
 
 	fn setup_click_handlers(&self, window_id: u64) {
 		let state = self.state.clone();
+		let state_select = self.state.clone();
 		let state_middle = self.state.clone();
 		let state_right = self.state.clone();
 		let button_ref = self.gtk_button.clone();
+		let button_ref_select = self.gtk_button.clone();
 		let last_click_time = Rc::new(RefCell::new(Instant::now() - Duration::from_secs(1)));
 		let app_id = self.app_id.clone();
 		let app_id_middle = self.app_id.clone();
 		let app_id_right = self.app_id.clone();
 		let title = self.title.clone();
+		let selection = self.selection.clone();
+		let selection_right = self.selection.clone();
 
 		let title_clone = title.clone();
+		let selection_left = selection.clone();
 		self.gtk_button.connect_clicked(move |_| {
 		    let is_currently_focused = button_ref.style_context().has_class("focused");
 		    let actions = state.settings().get_click_actions(
@@ -171,23 +185,44 @@ impl WindowButton {
 		        let mut last_click = last_click_time.borrow_mut();
 		        let now = Instant::now();
 		        let time_since_last = now.duration_since(*last_click);
-		        
+
 		        if time_since_last < Duration::from_millis(300) {
+		            selection_left.borrow_mut().clear();
 		            Self::execute_action(&state, window_id, &actions.double_click);
 		            *last_click = Instant::now() - Duration::from_secs(1);
 		        } else {
+		            selection_left.borrow_mut().clear();
 		            Self::execute_action(&state, window_id, &actions.left_click_focused);
 		            *last_click = now;
 		        }
 		    } else {
+		        selection_left.borrow_mut().clear();
 		        Self::execute_action(&state, window_id, &actions.left_click_unfocused);
 		    }
+		});
+
+		self.gtk_button.connect_button_press_event(move |_, event| {
+		    if event.button() == 1 {
+		        let modifier_held = Self::check_modifier(event.state(), state_select.settings().multi_select_modifier());
+		        if modifier_held {
+		            let mut sel = selection.borrow_mut();
+		            if sel.contains(&window_id) {
+		                sel.remove(&window_id);
+		                button_ref_select.style_context().remove_class("selected");
+		            } else {
+		                sel.insert(window_id);
+		                button_ref_select.style_context().add_class("selected");
+		            }
+		            return gtk::glib::Propagation::Stop;
+		        }
+		    }
+		    gtk::glib::Propagation::Proceed
 		});
 
 		let menu_self = self.clone_for_menu();
 		let title_middle = title.clone();
 		let button_ref_middle = self.gtk_button.clone();
-		self.gtk_button.connect_button_press_event(move |_, event| {
+		self.gtk_button.connect_button_release_event(move |_, event| {
 		    let is_currently_focused = button_ref_middle.style_context().has_class("focused");
 		    if event.button() == 2 {
 		        let actions = state_middle.settings().get_click_actions(
@@ -206,19 +241,24 @@ impl WindowButton {
 		        }
 		        gtk::glib::Propagation::Stop
 		    } else if event.button() == 3 {
-		        let actions = state_right.settings().get_click_actions(
-		            app_id_right.as_deref(),
-		            title_middle.borrow().as_deref()
-		        );
-		        let action = if is_currently_focused {
-		            &actions.right_click_focused
+		        let selection_count = selection_right.borrow().len();
+		        if selection_count > 0 {
+		            menu_self.display_multi_select_menu();
 		        } else {
-		            &actions.right_click_unfocused
-		        };
-		        if *action == crate::settings::WindowAction::Menu {
-		            menu_self.display_context_menu(window_id);
-		        } else {
-		            Self::execute_action(&state_right, window_id, action);
+		            let actions = state_right.settings().get_click_actions(
+		                app_id_right.as_deref(),
+		                title_middle.borrow().as_deref()
+		            );
+		            let action = if is_currently_focused {
+		                &actions.right_click_focused
+		            } else {
+		                &actions.right_click_unfocused
+		            };
+		            if *action == crate::settings::WindowAction::Menu {
+		                menu_self.display_context_menu(window_id);
+		            } else {
+		                Self::execute_action(&state_right, window_id, action);
+		            }
 		        }
 		        gtk::glib::Propagation::Stop
 		    } else {
@@ -426,20 +466,100 @@ impl WindowButton {
 		menu.set_reserve_toggle_size(false);
 
 		let menu_items = self.state.settings().context_menu();
-		
+
 		for menu_item in menu_items {
 		    let item = MenuItem::with_label(&menu_item.label);
 		    menu.append(&item);
-		    
+
 		    let state = self.state.clone();
 		    let action = menu_item.action.clone();
+		    let command = menu_item.command.clone();
+		    let app_id = self.app_id.clone();
+		    let title = self.title.borrow().clone();
 		    item.connect_activate(move |_| {
-		        Self::execute_action(&state, window_id, &action);
+		        if let Some(ref cmd) = command {
+		            Self::execute_command(cmd, window_id, app_id.as_deref(), title.as_deref());
+		        } else if let Some(ref act) = action {
+		            Self::execute_action(&state, window_id, act);
+		        }
 		    });
 		}
 
 		menu.show_all();
 		menu.popup_at_pointer(None);
+	}
+
+	fn execute_command(command: &str, window_id: u64, app_id: Option<&str>, title: Option<&str>) {
+		let cmd = command
+		    .replace("{window_id}", &window_id.to_string())
+		    .replace("{app_id}", app_id.unwrap_or(""))
+		    .replace("{title}", title.unwrap_or(""));
+
+		std::thread::spawn(move || {
+		    if let Err(e) = Command::new("sh").arg("-c").arg(&cmd).spawn() {
+		        tracing::error!(%e, "failed to execute command: {}", cmd);
+		    }
+		});
+	}
+
+	fn check_modifier(event_state: gtk::gdk::ModifierType, modifier: ModifierKey) -> bool {
+		match modifier {
+		    ModifierKey::Ctrl => event_state.contains(gtk::gdk::ModifierType::CONTROL_MASK),
+		    ModifierKey::Shift => event_state.contains(gtk::gdk::ModifierType::SHIFT_MASK),
+		    ModifierKey::Alt => event_state.contains(gtk::gdk::ModifierType::MOD1_MASK),
+		    ModifierKey::Super => event_state.contains(gtk::gdk::ModifierType::SUPER_MASK),
+		}
+	}
+
+	fn display_multi_select_menu(&self) {
+		let menu = Menu::new();
+		menu.set_reserve_toggle_size(false);
+
+		let menu_items = self.state.settings().multi_select_menu();
+		let selected_windows: Vec<u64> = self.selection.borrow().iter().copied().collect();
+
+		for menu_item in menu_items {
+		    let item = MenuItem::with_label(&menu_item.label);
+		    menu.append(&item);
+
+		    let state = self.state.clone();
+		    let selection = self.selection.clone();
+		    let action = menu_item.action.clone();
+		    let command = menu_item.command.clone();
+		    let windows = selected_windows.clone();
+		    item.connect_activate(move |_| {
+		        if let Some(ref cmd) = command {
+		            let windows_str = windows.iter().map(|w| w.to_string()).collect::<Vec<_>>().join(",");
+		            let cmd = cmd.replace("{window_ids}", &windows_str);
+		            std::thread::spawn(move || {
+		                if let Err(e) = Command::new("sh").arg("-c").arg(&cmd).spawn() {
+		                    tracing::error!(%e, "failed to execute multi-select command");
+		                }
+		            });
+		        } else if let Some(ref act) = action {
+		            Self::execute_multi_select_action(&state, &windows, act);
+		        }
+		        selection.borrow_mut().clear();
+		    });
+		}
+
+		menu.show_all();
+		menu.popup_at_pointer(None);
+	}
+
+	fn execute_multi_select_action(state: &SharedState, window_ids: &[u64], action: &MultiSelectAction) {
+		for &window_id in window_ids {
+		    let result = match action {
+		        MultiSelectAction::CloseWindows => state.compositor().close_window(window_id),
+		        MultiSelectAction::MoveToWorkspaceUp => state.compositor().move_window_to_workspace_up(window_id),
+		        MultiSelectAction::MoveToWorkspaceDown => state.compositor().move_window_to_workspace_down(window_id),
+		        MultiSelectAction::ToggleFloating => state.compositor().toggle_floating(window_id),
+		        MultiSelectAction::FullscreenWindows => state.compositor().fullscreen_window(window_id),
+		    };
+		    if let Err(e) = result {
+		        tracing::warn!(%e, id = window_id, "multi-select action failed");
+		    }
+		}
 	}
 
 	fn clone_for_menu(&self) -> Self {
@@ -452,6 +572,7 @@ impl WindowButton {
 		    state: self.state.clone(),
 		    window_id: self.window_id,
 		    title: self.title.clone(),
+		    selection: self.selection.clone(),
 		}
 	}
 

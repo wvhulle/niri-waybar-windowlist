@@ -49,6 +49,20 @@ pub struct Settings {
     ignore_rules: Vec<IgnoreRule>,
     #[serde(default = "default_context_menu")]
     context_menu: Vec<ContextMenuItem>,
+    #[serde(default = "default_modifier")]
+    multi_select_modifier: ModifierKey,
+    #[serde(default = "default_multi_select_menu")]
+    multi_select_menu: Vec<MultiSelectMenuItem>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ModifierKey {
+    #[default]
+    Ctrl,
+    Shift,
+    Alt,
+    Super,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -178,7 +192,29 @@ pub struct IgnoreRule {
 #[derive(Debug, Clone, Deserialize)]
 pub struct ContextMenuItem {
     pub label: String,
-    pub action: WindowAction,
+    #[serde(default)]
+    pub action: Option<WindowAction>,
+    #[serde(default)]
+    pub command: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct MultiSelectMenuItem {
+    pub label: String,
+    #[serde(default)]
+    pub action: Option<MultiSelectAction>,
+    #[serde(default)]
+    pub command: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub enum MultiSelectAction {
+    CloseWindows,
+    MoveToWorkspaceUp,
+    MoveToWorkspaceDown,
+    ToggleFloating,
+    FullscreenWindows,
 }
 
 fn parse_regex<'de, D>(deserializer: D) -> Result<Regex, D::Error>
@@ -213,23 +249,49 @@ fn default_double_click() -> WindowAction { WindowAction::MaximizeWindowToEdges 
 fn default_right_click() -> WindowAction { WindowAction::Menu }
 fn default_middle_click() -> WindowAction { WindowAction::CloseWindow }
 
+fn default_modifier() -> ModifierKey { ModifierKey::Ctrl }
+
 fn default_context_menu() -> Vec<ContextMenuItem> {
     vec![
         ContextMenuItem {
             label: "  Maximize Column".to_string(),
-            action: WindowAction::MaximizeColumn,
+            action: Some(WindowAction::MaximizeColumn),
+            command: None,
         },
         ContextMenuItem {
             label: "  Maximize to Edges".to_string(),
-            action: WindowAction::MaximizeWindowToEdges,
+            action: Some(WindowAction::MaximizeWindowToEdges),
+            command: None,
         },
         ContextMenuItem {
             label: "󰉩  Toggle Floating".to_string(),
-            action: WindowAction::ToggleWindowFloating,
+            action: Some(WindowAction::ToggleWindowFloating),
+            command: None,
         },
         ContextMenuItem {
             label: "  Close Window".to_string(),
-            action: WindowAction::CloseWindow,
+            action: Some(WindowAction::CloseWindow),
+            command: None,
+        },
+    ]
+}
+
+fn default_multi_select_menu() -> Vec<MultiSelectMenuItem> {
+    vec![
+        MultiSelectMenuItem {
+            label: "  Close All".to_string(),
+            action: Some(MultiSelectAction::CloseWindows),
+            command: None,
+        },
+        MultiSelectMenuItem {
+            label: "  Move All to Workspace Up".to_string(),
+            action: Some(MultiSelectAction::MoveToWorkspaceUp),
+            command: None,
+        },
+        MultiSelectMenuItem {
+            label: "  Move All to Workspace Down".to_string(),
+            action: Some(MultiSelectAction::MoveToWorkspaceDown),
+            command: None,
         },
     ]
 }
@@ -367,5 +429,13 @@ impl Settings {
 
     pub fn context_menu(&self) -> &[ContextMenuItem] {
         &self.context_menu
+    }
+
+    pub fn multi_select_modifier(&self) -> ModifierKey {
+        self.multi_select_modifier
+    }
+
+    pub fn multi_select_menu(&self) -> &[MultiSelectMenuItem] {
+        &self.multi_select_menu
     }
 }

@@ -27,7 +27,7 @@ use errors::ModuleError;
 use global::{EventMessage, SharedState};
 use notifications::NotificationData;
 use system::ProcessInfo;
-use widget::WindowButton;
+use widget::{WindowButton, SelectionState, create_selection_state};
 
 static LOGGING: LazyLock<()> = LazyLock::new(|| {
     if let Err(e) = tracing_subscriber::fmt()
@@ -234,6 +234,7 @@ struct ModuleInstance {
     previous_snapshot: Option<WindowSnapshot>,
     current_output: Option<String>,
     state: SharedState,
+    selection: SelectionState,
 }
 
 impl ModuleInstance {
@@ -246,6 +247,7 @@ impl ModuleInstance {
             previous_snapshot: None,
             current_output: None,
             state,
+            selection: create_selection_state(),
         }
     }
 
@@ -500,7 +502,7 @@ impl ModuleInstance {
 
             let button = self.buttons.entry(window.id).or_insert_with(|| {
                 new_button_added = true;
-                let btn = WindowButton::create(&self.state, window);
+                let btn = WindowButton::create(&self.state, window, self.selection.clone());
                 btn.get_widget().set_size_request(initial_width, -1);
                 self.container.add(btn.get_widget());
                 btn
@@ -539,6 +541,7 @@ impl ModuleInstance {
             if let Some(button) = self.buttons.remove(&window_id) {
                 self.container.remove(button.get_widget());
             }
+            self.selection.borrow_mut().remove(&window_id);
         }
 
         if !self.buttons.is_empty() {
