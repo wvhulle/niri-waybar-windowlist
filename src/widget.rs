@@ -191,10 +191,10 @@ impl WindowButton {
 		    }
 
 		    let is_currently_focused = button_ref.style_context().has_class("focused");
-		    let actions = state.settings().get_click_actions(
-		        app_id.as_deref(),
-		        title_clone.borrow().as_deref()
-		    );
+		    let app_id_ref = app_id.as_deref();
+		    let title_ref = title_clone.borrow();
+		    let title_str = title_ref.as_deref();
+		    let actions = state.settings().get_click_actions(app_id_ref, title_str);
 
 		    if is_currently_focused {
 		        let mut last_click = last_click_time.borrow_mut();
@@ -203,16 +203,16 @@ impl WindowButton {
 
 		        if time_since_last < Duration::from_millis(300) {
 		            clear_selection(&selection_left);
-		            Self::execute_action(&state, window_id, &actions.double_click);
+		            Self::execute_click_action(&state, window_id, &actions.double_click, app_id_ref, title_str);
 		            *last_click = Instant::now() - Duration::from_secs(1);
 		        } else {
 		            clear_selection(&selection_left);
-		            Self::execute_action(&state, window_id, &actions.left_click_focused);
+		            Self::execute_click_action(&state, window_id, &actions.left_click_focused, app_id_ref, title_str);
 		            *last_click = now;
 		        }
 		    } else {
 		        clear_selection(&selection_left);
-		        Self::execute_action(&state, window_id, &actions.left_click_unfocused);
+		        Self::execute_click_action(&state, window_id, &actions.left_click_unfocused, app_id_ref, title_str);
 		    }
 		});
 
@@ -240,19 +240,19 @@ impl WindowButton {
 		self.gtk_button.connect_button_release_event(move |_, event| {
 		    let is_currently_focused = button_ref_middle.style_context().has_class("focused");
 		    if event.button() == 2 {
-		        let actions = state_middle.settings().get_click_actions(
-		            app_id_middle.as_deref(),
-		            title_middle.borrow().as_deref()
-		        );
+		        let app_id_ref = app_id_middle.as_deref();
+		        let title_ref = title_middle.borrow();
+		        let title_str = title_ref.as_deref();
+		        let actions = state_middle.settings().get_click_actions(app_id_ref, title_str);
 		        let action = if is_currently_focused {
 		            &actions.middle_click_focused
 		        } else {
 		            &actions.middle_click_unfocused
 		        };
-		        if *action == crate::settings::WindowAction::Menu {
+		        if action.is_menu() {
 		            menu_self.display_context_menu(window_id);
 		        } else {
-		            Self::execute_action(&state_middle, window_id, action);
+		            Self::execute_click_action(&state_middle, window_id, action, app_id_ref, title_str);
 		        }
 		        gtk::glib::Propagation::Stop
 		    } else if event.button() == 3 {
@@ -260,19 +260,19 @@ impl WindowButton {
 		        if selection_count > 0 {
 		            menu_self.display_multi_select_menu();
 		        } else {
-		            let actions = state_right.settings().get_click_actions(
-		                app_id_right.as_deref(),
-		                title_middle.borrow().as_deref()
-		            );
+		            let app_id_ref = app_id_right.as_deref();
+		            let title_ref = title_middle.borrow();
+		            let title_str = title_ref.as_deref();
+		            let actions = state_right.settings().get_click_actions(app_id_ref, title_str);
 		            let action = if is_currently_focused {
 		                &actions.right_click_focused
 		            } else {
 		                &actions.right_click_unfocused
 		            };
-		            if *action == crate::settings::WindowAction::Menu {
+		            if action.is_menu() {
 		                menu_self.display_context_menu(window_id);
 		            } else {
-		                Self::execute_action(&state_right, window_id, action);
+		                Self::execute_click_action(&state_right, window_id, action, app_id_ref, title_str);
 		            }
 		        }
 		        gtk::glib::Propagation::Stop
@@ -287,10 +287,10 @@ impl WindowButton {
 		self.gtk_button.connect_scroll_event(move |_, event| {
 		    use waybar_cffi::gtk::gdk::ScrollDirection;
 
-		    let actions = state_scroll.settings().get_click_actions(
-		        app_id_scroll.as_deref(),
-		        title_scroll.borrow().as_deref()
-		    );
+		    let app_id_ref = app_id_scroll.as_deref();
+		    let title_ref = title_scroll.borrow();
+		    let title_str = title_ref.as_deref();
+		    let actions = state_scroll.settings().get_click_actions(app_id_ref, title_str);
 
 		    let action = match event.direction() {
 		        ScrollDirection::Up => &actions.scroll_up,
@@ -298,14 +298,32 @@ impl WindowButton {
 		        _ => return gtk::glib::Propagation::Proceed,
 		    };
 
-		    if *action != crate::settings::WindowAction::None {
-		        Self::execute_action(&state_scroll, window_id, action);
+		    if !action.is_none() {
+		        Self::execute_click_action(&state_scroll, window_id, action, app_id_ref, title_str);
 		        gtk::glib::Propagation::Stop
 		    } else {
 		        gtk::glib::Propagation::Proceed
 		    }
 		});
 	}
+
+    fn execute_click_action(
+        state: &SharedState,
+        window_id: u64,
+        action: &crate::settings::ClickAction,
+        app_id: Option<&str>,
+        title: Option<&str>,
+    ) {
+        use crate::settings::ClickAction;
+        match action {
+            ClickAction::Action(window_action) => {
+                Self::execute_action(state, window_id, window_action);
+            }
+            ClickAction::Command { command } => {
+                Self::execute_command(command, window_id, app_id, title);
+            }
+        }
+    }
 
     fn execute_action(state: &SharedState, window_id: u64, action: &crate::settings::WindowAction) {
         use crate::settings::WindowAction;
@@ -588,8 +606,16 @@ impl WindowButton {
 		        MultiSelectAction::CloseWindows => state.compositor().close_window(window_id),
 		        MultiSelectAction::MoveToWorkspaceUp => state.compositor().move_window_to_workspace_up(window_id),
 		        MultiSelectAction::MoveToWorkspaceDown => state.compositor().move_window_to_workspace_down(window_id),
+		        MultiSelectAction::MoveToMonitorLeft => state.compositor().move_window_to_monitor_left(window_id),
+		        MultiSelectAction::MoveToMonitorRight => state.compositor().move_window_to_monitor_right(window_id),
+		        MultiSelectAction::MoveToMonitorUp => state.compositor().move_window_to_monitor_up(window_id),
+		        MultiSelectAction::MoveToMonitorDown => state.compositor().move_window_to_monitor_down(window_id),
 		        MultiSelectAction::ToggleFloating => state.compositor().toggle_floating(window_id),
 		        MultiSelectAction::FullscreenWindows => state.compositor().fullscreen_window(window_id),
+		        MultiSelectAction::MaximizeColumns => state.compositor().maximize_window_column(window_id),
+		        MultiSelectAction::CenterColumns => state.compositor().center_column(window_id),
+		        MultiSelectAction::ConsumeIntoColumn => state.compositor().consume_window_into_column(window_id),
+		        MultiSelectAction::ToggleTabbedDisplay => state.compositor().toggle_column_tabbed_display(window_id),
 		    };
 		    if let Err(e) = result {
 		        tracing::warn!(%e, id = window_id, "multi-select action failed");

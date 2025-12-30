@@ -24,21 +24,13 @@ A Waybar module for displaying and managing traditional window buttons in the Ni
 
 ### From AUR (Arch Linux)
 
-**Stable release:**
 ```bash
-yay -S niri_window_buttons
+yay -S niri_window_buttons      # stable release
+yay -S niri_window_buttons-git  # latest git version
 ```
-
-The compiled module will be at `/usr/lib/waybar/libniri_window_buttons.so`.
-
-**Latest git version:**
-```bash
-yay -S niri_window_buttons-git
-```
-
-The compiled module will also be at `/usr/lib/waybar/libniri_window_buttons.so`.
 
 ### Manual Installation
+
 ```bash
 cargo build --release
 ```
@@ -113,21 +105,6 @@ The compiled module will be at `target/release/libniri_window_buttons.so`.
 | `icon_size` | Icon dimensions in pixels | `24` |
 | `icon_spacing` | Space between icon and title in pixels | `6` |
 
-#### Per-Output Width Configuration
-
-Set different taskbar widths for different monitors:
-```jsonc
-{
-  "max_taskbar_width": 1200,
-  "max_taskbar_width_per_output": {
-    "eDP-1": 800,
-    "HDMI-A-1": 1600,
-    "DP-1": 1400
-  }
-}
-```
-The `max_taskbar_width` is used as the default when no output-specific width is configured. Output names can be found using `niri msg outputs`.
-
 #### Per-Output Dimension Configuration
 
 For more granular control, configure all button dimensions per output:
@@ -151,7 +128,7 @@ For more granular control, configure all button dimensions per output:
 }
 ```
 
-The top-level dimension settings are used as defaults. For each output, you can override any combination of `min_button_width`, `max_button_width`, and `max_taskbar_width`. Settings in `dimensions_per_output` take precedence over both the top-level settings and the legacy `max_taskbar_width_per_output`.
+The top-level dimension settings are used as defaults. For each output, you can override any combination of `min_button_width`, `max_button_width`, and `max_taskbar_width`. Output names can be found using `niri msg outputs`.
 
 #### Scroll Overflow Behavior
 
@@ -183,6 +160,17 @@ Configure what happens when you click buttons. All click types can be assigned a
   "scroll_down": "move-column-right"
 }
 ```
+
+Click actions can also run custom shell commands using object syntax:
+
+```jsonc
+"click_actions": {
+  "left_click_focused": { "command": "notify-send 'Clicked {app_id}'" },
+  "middle_click_focused": { "command": "my-script.sh {window_id}" }
+}
+```
+
+Placeholders: `{window_id}`, `{app_id}`, `{title}`
 
 **Available actions:**
 
@@ -280,8 +268,16 @@ Select multiple windows using a modifier key, then perform batch actions via rig
 | `close-windows` | Close all selected windows |
 | `move-to-workspace-up` | Move all to workspace above |
 | `move-to-workspace-down` | Move all to workspace below |
+| `move-to-monitor-left` | Move all to left monitor |
+| `move-to-monitor-right` | Move all to right monitor |
+| `move-to-monitor-up` | Move all to upper monitor |
+| `move-to-monitor-down` | Move all to lower monitor |
 | `toggle-floating` | Toggle floating on all |
 | `fullscreen-windows` | Fullscreen all selected |
+| `maximize-columns` | Maximize all selected columns |
+| `center-columns` | Center all selected columns |
+| `consume-into-column` | Stack all selected into one column |
+| `toggle-tabbed-display` | Toggle tabbed mode for all selected |
 
 **Usage:**
 - Hold modifier + left-click to select/deselect windows

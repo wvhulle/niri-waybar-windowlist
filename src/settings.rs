@@ -101,37 +101,37 @@ pub struct AppRule {
 #[derive(Debug, Clone, Deserialize)]
 pub struct ClickActions {
     #[serde(default = "default_left_unfocused")]
-    pub left_click_unfocused: WindowAction,
+    pub left_click_unfocused: ClickAction,
     #[serde(default = "default_left_focused")]
-    pub left_click_focused: WindowAction,
+    pub left_click_focused: ClickAction,
     #[serde(default = "default_double_click")]
-    pub double_click: WindowAction,
+    pub double_click: ClickAction,
     #[serde(default = "default_right_click")]
-    pub right_click_unfocused: WindowAction,
+    pub right_click_unfocused: ClickAction,
     #[serde(default = "default_right_click")]
-    pub right_click_focused: WindowAction,
+    pub right_click_focused: ClickAction,
     #[serde(default = "default_middle_click")]
-    pub middle_click_unfocused: WindowAction,
+    pub middle_click_unfocused: ClickAction,
     #[serde(default = "default_middle_click")]
-    pub middle_click_focused: WindowAction,
+    pub middle_click_focused: ClickAction,
     #[serde(default = "default_none")]
-    pub scroll_up: WindowAction,
+    pub scroll_up: ClickAction,
     #[serde(default = "default_none")]
-    pub scroll_down: WindowAction,
+    pub scroll_down: ClickAction,
 }
 
 impl Default for ClickActions {
     fn default() -> Self {
         Self {
-            left_click_unfocused: default_left_unfocused(),
-            left_click_focused: default_left_focused(),
-            double_click: default_double_click(),
-            right_click_unfocused: default_right_click(),
-            right_click_focused: default_right_click(),
-            middle_click_unfocused: default_middle_click(),
-            middle_click_focused: default_middle_click(),
-            scroll_up: default_none(),
-            scroll_down: default_none(),
+            left_click_unfocused: ClickAction::Action(WindowAction::FocusWindow),
+            left_click_focused: ClickAction::Action(WindowAction::MaximizeColumn),
+            double_click: ClickAction::Action(WindowAction::MaximizeWindowToEdges),
+            right_click_unfocused: ClickAction::Action(WindowAction::Menu),
+            right_click_focused: ClickAction::Action(WindowAction::Menu),
+            middle_click_unfocused: ClickAction::Action(WindowAction::CloseWindow),
+            middle_click_focused: ClickAction::Action(WindowAction::CloseWindow),
+            scroll_up: ClickAction::Action(WindowAction::None),
+            scroll_down: ClickAction::Action(WindowAction::None),
         }
     }
 }
@@ -213,8 +213,33 @@ pub enum MultiSelectAction {
     CloseWindows,
     MoveToWorkspaceUp,
     MoveToWorkspaceDown,
+    MoveToMonitorLeft,
+    MoveToMonitorRight,
+    MoveToMonitorUp,
+    MoveToMonitorDown,
     ToggleFloating,
     FullscreenWindows,
+    MaximizeColumns,
+    CenterColumns,
+    ConsumeIntoColumn,
+    ToggleTabbedDisplay,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum ClickAction {
+    Action(WindowAction),
+    Command { command: String },
+}
+
+impl ClickAction {
+    pub fn is_menu(&self) -> bool {
+        matches!(self, ClickAction::Action(WindowAction::Menu))
+    }
+
+    pub fn is_none(&self) -> bool {
+        matches!(self, ClickAction::Action(WindowAction::None))
+    }
 }
 
 fn parse_regex<'de, D>(deserializer: D) -> Result<Regex, D::Error>
@@ -242,12 +267,12 @@ fn default_max_taskbar() -> i32 { 1200 }
 fn default_scroll_arrow_left() -> String { "◀".to_string() }
 fn default_scroll_arrow_right() -> String { "▶".to_string() }
 
-fn default_none() -> WindowAction { WindowAction::None }
-fn default_left_unfocused() -> WindowAction { WindowAction::FocusWindow }
-fn default_left_focused() -> WindowAction { WindowAction::MaximizeColumn }
-fn default_double_click() -> WindowAction { WindowAction::MaximizeWindowToEdges }
-fn default_right_click() -> WindowAction { WindowAction::Menu }
-fn default_middle_click() -> WindowAction { WindowAction::CloseWindow }
+fn default_none() -> ClickAction { ClickAction::Action(WindowAction::None) }
+fn default_left_unfocused() -> ClickAction { ClickAction::Action(WindowAction::FocusWindow) }
+fn default_left_focused() -> ClickAction { ClickAction::Action(WindowAction::MaximizeColumn) }
+fn default_double_click() -> ClickAction { ClickAction::Action(WindowAction::MaximizeWindowToEdges) }
+fn default_right_click() -> ClickAction { ClickAction::Action(WindowAction::Menu) }
+fn default_middle_click() -> ClickAction { ClickAction::Action(WindowAction::CloseWindow) }
 
 fn default_modifier() -> ModifierKey { ModifierKey::Ctrl }
 

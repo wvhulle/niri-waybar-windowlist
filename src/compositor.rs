@@ -148,6 +148,20 @@ impl CompositorClient {
     }
 
     #[tracing::instrument(level = "TRACE", err)]
+    pub fn move_window_to_monitor_up(&self, window_id: u64) -> Result<(), ModuleError> {
+        self.focus_window(window_id)?;
+        let response = send_request(Request::Action(Action::MoveWindowToMonitorUp {}))?;
+        validate_handled(response)
+    }
+
+    #[tracing::instrument(level = "TRACE", err)]
+    pub fn move_window_to_monitor_down(&self, window_id: u64) -> Result<(), ModuleError> {
+        self.focus_window(window_id)?;
+        let response = send_request(Request::Action(Action::MoveWindowToMonitorDown {}))?;
+        validate_handled(response)
+    }
+
+    #[tracing::instrument(level = "TRACE", err)]
     pub fn toggle_column_tabbed_display(&self, window_id: u64) -> Result<(), ModuleError> {
         self.focus_window(window_id)?;
         let response = send_request(Request::Action(Action::ToggleColumnTabbedDisplay {}))?;
