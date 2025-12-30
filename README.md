@@ -27,6 +27,8 @@ A Waybar module for displaying and managing traditional window buttons in the Ni
 ```bash
 yay -S niri_window_buttons      # stable release
 yay -S niri_window_buttons-git  # latest git version
+
+The compiled module will be at `/usr/lib/waybar/libniri_window_buttons.so`.
 ```
 
 ### Manual Installation
@@ -228,6 +230,7 @@ Customize which actions appear in the context menu and their order:
   {"label": "  Maximize Column", "action": "maximize-column"},
   {"label": "  Maximize to Edges", "action": "maximize-window-to-edges"},
   {"label": "󰉩  Toggle Floating", "action": "toggle-window-floating"},
+  {"label": "󱆃  Custom Script", "command": "my-script.sh {window_ids}"},
   {"label": "  Close Window", "action": "close-window"}
 ]
 ```
@@ -249,12 +252,12 @@ Select multiple windows using a modifier key, then perform batch actions via rig
 {
   "multi_select_modifier": "ctrl",
   "multi_select_menu": [
-    {"label": "  Close All", "action": "close-windows"},
     {"label": "  Move All Up", "action": "move-to-workspace-up"},
     {"label": "  Move All Down", "action": "move-to-workspace-down"},
     {"label": "󰉩  Float All", "action": "toggle-floating"},
     {"label": "  Fullscreen All", "action": "fullscreen-windows"},
     {"label": "󱆃  Custom Script", "command": "my-script.sh {window_ids}"}
+    {"label": "  Close All", "action": "close-windows"},
   ]
 }
 ```
