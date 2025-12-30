@@ -27,9 +27,9 @@ A Waybar module for displaying and managing traditional window buttons in the Ni
 ```bash
 yay -S niri_window_buttons      # stable release
 yay -S niri_window_buttons-git  # latest git version
+```
 
 The compiled module will be at `/usr/lib/waybar/libniri_window_buttons.so`.
-```
 
 ### Manual Installation
 
