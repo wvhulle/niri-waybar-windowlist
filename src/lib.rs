@@ -8,7 +8,7 @@ use settings::Settings;
 use tracing_subscriber::{EnvFilter, fmt::format::FmtSpan};
 use waybar_cffi::{
     Module,
-    gtk::{self, Orientation, ReliefStyle, ScrolledWindow, gio, glib::MainContext, traits::{AdjustmentExt, BoxExt, ButtonExt, ContainerExt, ScrolledWindowExt, StyleContextExt, WidgetExt}},
+    gtk::{self, Orientation, ReliefStyle, ScrolledWindow, gio, glib::MainContext, traits::{AdjustmentExt, BoxExt, ButtonExt, ContainerExt, ScrolledWindowExt, StyleContextExt, WidgetExt}, gdk::EventMask, prelude::WidgetExtManual},
     waybar_module,
 };
 
@@ -27,7 +27,7 @@ use errors::ModuleError;
 use global::{EventMessage, SharedState};
 use notifications::NotificationData;
 use system::ProcessInfo;
-use widget::{WindowButton, SelectionState, create_selection_state, clear_selection};
+use widget::{WindowButton, SelectionState, create_selection_state, clear_selection, set_taskbar_adjustment};
 
 static LOGGING: LazyLock<()> = LazyLock::new(|| {
     if let Err(e) = tracing_subscriber::fmt()
@@ -79,13 +79,24 @@ async fn initialize_module(info: &waybar_cffi::InitInfo, state: SharedState) -> 
     scrolled.set_overlay_scrolling(false);
     scrolled.set_propagate_natural_width(false);
 
-    let scrolled_clone = scrolled.clone();
-    scrolled.connect_scroll_event(move |_, event| {
+    let initial_max_width = state.settings().max_taskbar_width_for_output(None);
+    main_container.set_size_request(initial_max_width, -1);
+    main_container.set_hexpand(false);
+
+    let button_container = gtk::Box::new(Orientation::Horizontal, 0);
+    button_container.style_context().add_class("niri-window-buttons");
+    button_container.add_events(EventMask::SCROLL_MASK | EventMask::SMOOTH_SCROLL_MASK);
+    scrolled.add(&button_container);
+
+    set_taskbar_adjustment(scrolled.hadjustment());
+
+    let scrolled_for_scroll = scrolled.clone();
+    button_container.connect_scroll_event(move |_, event| {
         use waybar_cffi::gtk::gdk::ScrollDirection;
-        
-        let hadj = scrolled_clone.hadjustment();
+
+        let hadj = scrolled_for_scroll.hadjustment();
         let step = hadj.page_size() / 4.0;
-        
+
         match event.direction() {
            ScrollDirection::Up | ScrollDirection::Left => {
                hadj.set_value((hadj.value() - step).max(0.0));
@@ -96,15 +107,17 @@ async fn initialize_module(info: &waybar_cffi::InitInfo, state: SharedState) -> 
                hadj.set_value((hadj.value() + step).min(max));
                gtk::glib::Propagation::Stop
            }
+           ScrollDirection::Smooth => {
+               let (delta_x, delta_y) = event.delta();
+               let delta = if delta_x.abs() > delta_y.abs() { delta_x } else { delta_y };
+               let max = hadj.upper() - hadj.page_size();
+               let new_value = (hadj.value() + delta * step).clamp(0.0, max);
+               hadj.set_value(new_value);
+               gtk::glib::Propagation::Stop
+           }
            _ => gtk::glib::Propagation::Proceed
         }
     });
-
-    main_container.set_size_request(-1, -1);
-
-    let button_container = gtk::Box::new(Orientation::Horizontal, 0);
-    button_container.style_context().add_class("niri-window-buttons");
-    scrolled.add(&button_container);
     
     let right_arrow = gtk::Button::new();
     right_arrow.set_label(state.settings().scroll_arrow_right());

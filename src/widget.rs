@@ -2,7 +2,7 @@ use std::{cell::RefCell, collections::HashMap, fmt::Debug, path::PathBuf, proces
 use waybar_cffi::gtk::{
     self as gtk, CssProvider, IconLookupFlags, IconSize, IconTheme, Menu, MenuItem, Orientation, ReliefStyle,
     gdk_pixbuf::Pixbuf,
-    prelude::{BoxExt, ButtonExt, Cast, ContainerExt, CssProviderExt, DragContextExtManual, GdkPixbufExt, GtkMenuExt, GtkMenuItemExt, IconThemeExt, LabelExt, MenuShellExt, StyleContextExt, WidgetExt, WidgetExtManual},
+    prelude::{AdjustmentExt, BoxExt, ButtonExt, Cast, ContainerExt, CssProviderExt, DragContextExtManual, GdkPixbufExt, GtkMenuExt, GtkMenuItemExt, IconThemeExt, LabelExt, MenuShellExt, StyleContextExt, WidgetExt, WidgetExtManual},
     DestDefaults, TargetEntry, TargetFlags,
 };
 use crate::global::SharedState;
@@ -53,6 +53,25 @@ thread_local! {
     };
 
     static ICON_THEME_INSTANCE: IconTheme = IconTheme::default().unwrap_or_default();
+
+    static TASKBAR_ADJUSTMENT: std::cell::RefCell<Option<gtk::Adjustment>> = const { std::cell::RefCell::new(None) };
+}
+
+pub fn set_taskbar_adjustment(adj: gtk::Adjustment) {
+    TASKBAR_ADJUSTMENT.with(|cell| {
+        *cell.borrow_mut() = Some(adj);
+    });
+}
+
+fn scroll_taskbar(delta: f64) {
+    TASKBAR_ADJUSTMENT.with(|cell| {
+        if let Some(ref adj) = *cell.borrow() {
+            let step = adj.page_size() / 4.0;
+            let max = adj.upper() - adj.page_size();
+            let new_value = (adj.value() + delta * step).clamp(0.0, max);
+            adj.set_value(new_value);
+        }
+    });
 }
 
 impl WindowButton {
@@ -72,7 +91,7 @@ impl WindowButton {
         gtk_button.set_always_show_image(true);
         gtk_button.set_relief(ReliefStyle::None);
         gtk_button.add(&layout_box);
-        gtk_button.add_events(gtk::gdk::EventMask::SCROLL_MASK);
+        gtk_button.add_events(gtk::gdk::EventMask::SCROLL_MASK | gtk::gdk::EventMask::SMOOTH_SCROLL_MASK);
 
         let max_width = state.settings().max_button_width(None);
         gtk_button.set_size_request(max_width, -1);
@@ -292,18 +311,29 @@ impl WindowButton {
 		    let title_str = title_ref.as_deref();
 		    let actions = state_scroll.settings().get_click_actions(app_id_ref, title_str);
 
-		    let action = match event.direction() {
-		        ScrollDirection::Up => &actions.scroll_up,
-		        ScrollDirection::Down => &actions.scroll_down,
-		        _ => return gtk::glib::Propagation::Proceed,
+		    let (action, scroll_delta) = match event.direction() {
+		        ScrollDirection::Up => (&actions.scroll_up, -1.0),
+		        ScrollDirection::Down => (&actions.scroll_down, 1.0),
+		        ScrollDirection::Smooth => {
+		            let (delta_x, delta_y) = event.delta();
+		            let delta = if delta_x.abs() > delta_y.abs() { delta_x } else { delta_y };
+		            if delta < -0.01 {
+		                (&actions.scroll_up, delta)
+		            } else if delta > 0.01 {
+		                (&actions.scroll_down, delta)
+		            } else {
+		                return gtk::glib::Propagation::Stop;
+		            }
+		        }
+		        _ => return gtk::glib::Propagation::Stop,
 		    };
 
 		    if !action.is_none() {
 		        Self::execute_click_action(&state_scroll, window_id, action, app_id_ref, title_str);
-		        gtk::glib::Propagation::Stop
 		    } else {
-		        gtk::glib::Propagation::Proceed
+		        scroll_taskbar(scroll_delta);
 		    }
+		    gtk::glib::Propagation::Stop
 		});
 	}
 

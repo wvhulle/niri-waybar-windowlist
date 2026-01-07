@@ -134,7 +134,18 @@ The top-level dimension settings are used as defaults. For each output, you can 
 
 #### Scroll Overflow Behavior
 
-When window buttons exceed `max_taskbar_width`, the taskbar becomes scrollable with arrow buttons. The arrow glyphs can be customized:
+When window buttons exceed `max_taskbar_width`, the taskbar becomes scrollable. Arrow buttons appear at the edges for navigation.
+
+**Scrolling methods:**
+
+| Method | Behavior |
+|--------|----------|
+| Click arrow buttons | Scrolls taskbar by one page |
+| Mouse wheel on buttons | Scrolls taskbar (when `scroll_up`/`scroll_down` are `"none"`) |
+
+When `scroll_up`/`scroll_down` are set to a window action (e.g., `"move-column-left"`), that action executes instead of scrolling the taskbar. Set them to `"none"` to enable mouse wheel taskbar scrolling.
+
+**Arrow customization:**
 
 ```jsonc
 {
@@ -178,7 +189,7 @@ Placeholders: `{window_id}`, `{app_id}`, `{title}`
 
 | Action | Description |
 |--------|-------------|
-| `none` | Do nothing |
+| `none` | Do nothing (for `scroll_up`/`scroll_down`: enables taskbar scrolling) |
 | `menu` | Show context menu |
 | `focus-window` | Focus the window |
 | `close-window` | Close the window |
