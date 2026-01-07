@@ -217,6 +217,8 @@ pub enum MultiSelectAction {
     MoveToMonitorRight,
     MoveToMonitorUp,
     MoveToMonitorDown,
+    MoveColumnLeft,
+    MoveColumnRight,
     ToggleFloating,
     FullscreenWindows,
     MaximizeColumns,

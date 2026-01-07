@@ -286,6 +286,8 @@ Select multiple windows using a modifier key, then perform batch actions via rig
 | `move-to-monitor-right` | Move all to right monitor |
 | `move-to-monitor-up` | Move all to upper monitor |
 | `move-to-monitor-down` | Move all to lower monitor |
+| `move-column-left` | Move column left (keeps stacked/tabbed windows together) |
+| `move-column-right` | Move column right (keeps stacked/tabbed windows together) |
 | `toggle-floating` | Toggle floating on all |
 | `fullscreen-windows` | Fullscreen all selected |
 | `maximize-columns` | Maximize all selected columns |
@@ -297,6 +299,12 @@ Select multiple windows using a modifier key, then perform batch actions via rig
 - Hold modifier + left-click to select/deselect windows
 - Right-click with selections to show multi-select menu
 - Click any window (or window button without modifier) clears selection
+
+**Drag-and-drop with stacked/tabbed windows:**
+- Normal drag: expels window from stack, moves it individually
+- Modifier + drag: moves entire column together (keeps windows stacked)
+
+Note: Multi-select and modifier-drag are independent. Selecting stacked windows then modifier-dragging will move the column, not the selection. Use the right-click menu for batch actions on selections.
 
 Custom commands receive `{window_ids}` as a comma-separated list of window IDs.
 
@@ -446,6 +454,5 @@ Customize appearance using Waybar's GTK CSS. The module container uses class `.n
 - Toggle window title visibility per button
 - Minimize/scratchpad support
 - Window grouping by app
-- Stacked tabs support
 - Double stacked bar
 - Dynamic sized buttons to reflect niri overview

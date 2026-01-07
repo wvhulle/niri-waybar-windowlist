@@ -263,12 +263,12 @@ impl CompositorClient {
     }
 
     #[tracing::instrument(level = "TRACE", err)]
-    pub fn reposition_window(&self, window_id: u64, position_delta: i32) -> Result<(), ModuleError> {
+    pub fn reposition_window(&self, window_id: u64, position_delta: i32, keep_stacked: bool) -> Result<(), ModuleError> {
         if position_delta == 0 {
             return Ok(());
         }
 
-        tracing::info!("repositioning window {} by {} columns", window_id, position_delta);
+        tracing::info!("repositioning window {} by {} columns (keep_stacked: {})", window_id, position_delta, keep_stacked);
 
         let response = send_request(Request::Windows)?;
         let all_windows: Vec<niri_ipc::Window> = match response {
@@ -293,7 +293,7 @@ impl CompositorClient {
 
         self.focus_window(window_id)?;
 
-        let effective_col = if is_stacked {
+        let effective_col = if is_stacked && !keep_stacked {
             tracing::trace!("expelling stacked window from column");
             let response = send_request(Request::Action(Action::ExpelWindowFromColumn {}))?;
             validate_handled(response)?;

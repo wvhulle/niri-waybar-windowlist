@@ -566,6 +566,10 @@ impl WindowButton {
 	}
 
 	fn check_modifier(_button: &gtk::Button, modifier: ModifierKey) -> bool {
+		Self::check_modifier_static(modifier)
+	}
+
+	fn check_modifier_static(modifier: ModifierKey) -> bool {
 		use evdev::Key;
 
 		let keys_to_check: &[Key] = match modifier {
@@ -640,6 +644,8 @@ impl WindowButton {
 		        MultiSelectAction::MoveToMonitorRight => state.compositor().move_window_to_monitor_right(window_id),
 		        MultiSelectAction::MoveToMonitorUp => state.compositor().move_window_to_monitor_up(window_id),
 		        MultiSelectAction::MoveToMonitorDown => state.compositor().move_window_to_monitor_down(window_id),
+		        MultiSelectAction::MoveColumnLeft => state.compositor().move_column_left(window_id),
+		        MultiSelectAction::MoveColumnRight => state.compositor().move_column_right(window_id),
 		        MultiSelectAction::ToggleFloating => state.compositor().toggle_floating(window_id),
 		        MultiSelectAction::FullscreenWindows => state.compositor().fullscreen_window(window_id),
 		        MultiSelectAction::MaximizeColumns => state.compositor().maximize_window_column(window_id),
@@ -738,6 +744,7 @@ impl WindowButton {
 
         let state = self.state.clone();
         let pos_for_drop = initial_position.clone();
+        let settings_for_drop = self.state.settings().clone();
         self.gtk_button.connect_drag_data_received(move |_widget, ctx, _, _, data, _, time| {
             tracing::info!("drop received");
 
@@ -750,9 +757,10 @@ impl WindowButton {
                                 let end_pos = container.child_position(&source);
                                 let delta = end_pos - start_pos;
 
-                                tracing::info!("position change: {} -> {} (delta: {})", start_pos, end_pos, delta);
+                                let keep_stacked = Self::check_modifier_static(settings_for_drop.multi_select_modifier());
+                                tracing::info!("position change: {} -> {} (delta: {}, keep_stacked: {})", start_pos, end_pos, delta, keep_stacked);
 
-                                match state.compositor().reposition_window(dragged_window_id, delta) {
+                                match state.compositor().reposition_window(dragged_window_id, delta, keep_stacked) {
                                     Ok(()) => {
                                         tracing::info!("reposition successful");
                                         ctx.drag_finish(true, false, time);
