@@ -285,27 +285,41 @@ impl CompositorClient {
             return Ok(());
         };
 
-        let tile_position = target.layout.pos_in_scrolling_layout.map(|(_, tile)| tile).unwrap_or(1);
+        let (current_col, tile_position) = target
+            .layout
+            .pos_in_scrolling_layout
+            .unwrap_or((1, 1));
         let is_stacked = tile_position > 1;
 
         self.focus_window(window_id)?;
 
-        if is_stacked {
+        let effective_col = if is_stacked {
             tracing::trace!("expelling stacked window from column");
             let response = send_request(Request::Action(Action::ExpelWindowFromColumn {}))?;
             validate_handled(response)?;
-        }
 
-        let (action, count) = if position_delta < 0 {
-            (Action::MoveColumnLeft {}, position_delta.abs())
+            let response = send_request(Request::Windows)?;
+            let windows: Vec<niri_ipc::Window> = match response {
+                Ok(niri_ipc::Response::Windows(w)) => w,
+                Ok(other) => return Err(ModuleError::unexpected_response("Windows", other)),
+                Err(msg) => return Err(ModuleError::CompositorReply(msg)),
+            };
+
+            windows
+                .iter()
+                .find(|w| w.id == window_id)
+                .and_then(|w| w.layout.pos_in_scrolling_layout)
+                .map(|(col, _)| col)
+                .unwrap_or(current_col)
         } else {
-            (Action::MoveColumnRight {}, position_delta)
+            current_col
         };
 
-        for _ in 0..count {
-            let response = send_request(Request::Action(action.clone()))?;
-            validate_handled(response)?;
-        }
+        let target_index = (effective_col as i32 + position_delta).max(1) as usize;
+        tracing::trace!("moving column from {} to {}", effective_col, target_index);
+
+        let response = send_request(Request::Action(Action::MoveColumnToIndex { index: target_index }))?;
+        validate_handled(response)?;
 
         if let Some(original_focus) = currently_focused {
             if original_focus != window_id {

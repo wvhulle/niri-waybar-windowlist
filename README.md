@@ -438,7 +438,6 @@ Customize appearance using Waybar's GTK CSS. The module container uses class `.n
 
 ## Limitations
 
-- **Drag-and-drop reordering** works by sending multiple move-left/move-right commands to niri, as the IPC doesn't expose absolute window positions
 - **Maximized-to-edges state** cannot be visually indicated because niri IPC doesn't expose this information
 
 ## Wishlist / Future Ideas
@@ -448,3 +447,5 @@ Customize appearance using Waybar's GTK CSS. The module container uses class `.n
 - Minimize/scratchpad support
 - Window grouping by app
 - Stacked tabs support
+- Double stacked bar
+- Dynamic sized buttons to reflect niri overview
