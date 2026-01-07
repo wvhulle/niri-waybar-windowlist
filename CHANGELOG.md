@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-01-07
+
+### Fixed
+- Scroll overflow now works with smooth scrolling (touchpads, modern mice)
+- Mouse wheel on buttons scrolls taskbar when `scroll_up`/`scroll_down` are `"none"`
+- Container no longer expands beyond `max_taskbar_width`
+
+### Changed
+- Drag-and-drop repositioning uses `MoveColumnToIndex` for efficiency (single IPC call instead of multiple move commands)
+
 ## [0.3.1] - 2025-12-29
 
 ### Added
