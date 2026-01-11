@@ -280,7 +280,10 @@ impl ModuleInstance {
                 EventMessage::Workspaces(_) => {
                     let updated_filter = self.determine_display_filter().await;
                     let filter_changed = {
-                        let mut filter_lock = display_filter.lock().expect("display filter lock");
+                        let Ok(mut filter_lock) = display_filter.lock() else {
+                            tracing::warn!("display filter lock poisoned");
+                            continue;
+                        };
                         let changed = *filter_lock != updated_filter;
                         *filter_lock = updated_filter;
                         changed
@@ -499,7 +502,10 @@ impl ModuleInstance {
         let mut new_button_added = false;
 
         for window in snapshot.iter().filter(|w| {
-            if !filter.lock().expect("filter lock").should_display(w.get_output().unwrap_or_default()) {
+            let should_display = filter.lock()
+                .map(|f| f.should_display(w.get_output().unwrap_or_default()))
+                .unwrap_or(true);
+            if !should_display {
                 return false;
             }
             if let Some(_app_id) = &w.app_id {

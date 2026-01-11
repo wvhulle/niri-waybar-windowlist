@@ -392,11 +392,32 @@ impl WorkspaceEventStream {
 }
 
 fn run_workspace_stream(tx: Sender<Vec<Workspace>>) -> Result<(), ModuleError> {
+    const MAX_BACKOFF_SECS: u64 = 30;
+    let mut backoff_secs = 1u64;
+
+    loop {
+        match try_run_workspace_stream(&tx) {
+            Ok(()) | Err(ModuleError::SnapshotChannelClosed) => {
+                tracing::info!("workspace event stream ended");
+                return Ok(());
+            }
+            Err(e) => {
+                tracing::warn!(%e, backoff_secs, "workspace event stream error, reconnecting");
+                std::thread::sleep(std::time::Duration::from_secs(backoff_secs));
+                backoff_secs = (backoff_secs * 2).min(MAX_BACKOFF_SECS);
+            }
+        }
+    }
+}
+
+fn try_run_workspace_stream(tx: &Sender<Vec<Workspace>>) -> Result<(), ModuleError> {
     let mut socket = connect_socket()?;
     let response = socket.send(Request::EventStream).map_err(ModuleError::CompositorIpc)?;
     validate_handled(response)?;
 
+    tracing::info!("workspace event stream connected");
     let mut event_reader = socket.read_events();
+
     loop {
         match event_reader() {
             Ok(Event::WorkspacesChanged { workspaces }) => {
@@ -404,7 +425,6 @@ fn run_workspace_stream(tx: Sender<Vec<Workspace>>) -> Result<(), ModuleError> {
             }
             Ok(_) => {}
             Err(e) => {
-                tracing::error!(%e, "workspace event stream error");
                 return Err(ModuleError::CompositorIpc(e));
             }
         }
@@ -412,12 +432,36 @@ fn run_workspace_stream(tx: Sender<Vec<Workspace>>) -> Result<(), ModuleError> {
 }
 
 fn run_window_stream(tx: Sender<WindowSnapshot>, filter_workspace: bool) -> Result<(), ModuleError> {
+    const MAX_BACKOFF_SECS: u64 = 30;
+    let mut backoff_secs = 1u64;
+    let mut window_state = WindowTracker::new();
+
+    loop {
+        match try_run_window_stream(&tx, &mut window_state, filter_workspace) {
+            Ok(()) | Err(ModuleError::SnapshotChannelClosed) => {
+                tracing::info!("window event stream ended");
+                return Ok(());
+            }
+            Err(e) => {
+                tracing::warn!(%e, backoff_secs, "window event stream error, reconnecting");
+                std::thread::sleep(std::time::Duration::from_secs(backoff_secs));
+                backoff_secs = (backoff_secs * 2).min(MAX_BACKOFF_SECS);
+            }
+        }
+    }
+}
+
+fn try_run_window_stream(
+    tx: &Sender<WindowSnapshot>,
+    window_state: &mut WindowTracker,
+    filter_workspace: bool,
+) -> Result<(), ModuleError> {
     let mut socket = connect_socket()?;
     let response = socket.send(Request::EventStream).map_err(ModuleError::CompositorIpc)?;
     validate_handled(response)?;
 
+    tracing::info!("window event stream connected");
     let mut event_reader = socket.read_events();
-    let mut window_state = WindowTracker::new();
 
     loop {
         match event_reader() {
@@ -427,7 +471,6 @@ fn run_window_stream(tx: Sender<WindowSnapshot>, filter_workspace: bool) -> Resu
                 }
             }
             Err(e) => {
-                tracing::error!(%e, "event stream read error");
                 return Err(ModuleError::CompositorIpc(e));
             }
         }

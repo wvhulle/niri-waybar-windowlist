@@ -15,16 +15,30 @@ mod pid_cache;
 
 pub fn create_stream() -> impl Stream<Item = NotificationData> {
     let (tx, rx) = async_channel::unbounded();
-    glib::spawn_future_local(async move {
-        match run_monitor(tx).await {
-            Ok(()) => tracing::info!("notification monitor stopped"),
-            Err(e) => tracing::error!(%e, "notification monitor error"),
-        }
-    });
+    glib::spawn_future_local(run_monitor_with_reconnect(tx));
 
     async_stream::stream! {
         while let Ok(notification) = rx.recv().await {
             yield notification;
+        }
+    }
+}
+
+async fn run_monitor_with_reconnect(tx: Sender<NotificationData>) {
+    const MAX_BACKOFF_SECS: u64 = 30;
+    let mut backoff_secs = 1u64;
+
+    loop {
+        match run_monitor(tx.clone()).await {
+            Ok(()) => {
+                tracing::info!("notification monitor ended");
+                return;
+            }
+            Err(e) => {
+                tracing::warn!(%e, backoff_secs, "notification monitor error, reconnecting");
+                glib::timeout_future_seconds(backoff_secs as u32).await;
+                backoff_secs = (backoff_secs * 2).min(MAX_BACKOFF_SECS);
+            }
         }
     }
 }
@@ -123,6 +137,7 @@ async fn run_monitor(tx: Sender<NotificationData>) -> anyhow::Result<()> {
         )
         .await?;
 
+    tracing::info!("notification monitor connected");
     let mut message_stream = MessageStream::from(connection);
     while let Some(msg) = message_stream.try_next().await? {
         if let Err(e) = handle_message(&tx, &pid_resolver, &msg).await {

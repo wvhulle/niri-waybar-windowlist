@@ -18,7 +18,12 @@ impl IconResolver {
 
     #[tracing::instrument(level = "TRACE", ret)]
     pub fn resolve(&self, app_id: &str) -> Option<PathBuf> {
-        let mut cache = self.0.lock().expect("icon resolver lock");
+        let mut cache = self.0.lock().unwrap_or_else(|poisoned| {
+            tracing::warn!("icon resolver lock was poisoned, clearing cache");
+            let mut guard = poisoned.into_inner();
+            guard.clear();
+            guard
+        });
 
         if !cache.contains_key(app_id) {
             if let Some(path) = search_for_icon(app_id) {
