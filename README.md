@@ -13,7 +13,7 @@ A Waybar module for displaying and managing traditional window buttons in the Ni
 - Multi-select windows with modifier keys
 - Per-application click behavior and styling via regex title matching
 - Advanced window filtering (by app, title, workspace)
-- Drag and drop window reordering
+- Drag and drop window reordering with hover-to-focus for external drags
 - Dynamic button sizing with taskbar width limits and scroll overflow
 - Multi-monitor support
 - Notification integration with urgency hints
@@ -96,6 +96,8 @@ The compiled module will be at `target/release/libniri_window_buttons.so`.
 | `show_all_outputs` | Show windows from all monitors | `false` |
 | `only_current_workspace` | Show only current workspace windows | `false` |
 | `show_window_titles` | Display window titles next to icons | `true` |
+| `drag_hover_focus` | Focus window when external drag hovers over button | `true` |
+| `drag_hover_focus_delay` | Delay in milliseconds before hover triggers focus | `500` |
 
 ### Size Controls
 

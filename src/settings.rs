@@ -53,6 +53,10 @@ pub struct Settings {
     multi_select_modifier: ModifierKey,
     #[serde(default = "default_multi_select_menu")]
     multi_select_menu: Vec<MultiSelectMenuItem>,
+    #[serde(default = "default_true")]
+    drag_hover_focus: bool,
+    #[serde(default = "default_drag_hover_delay")]
+    drag_hover_focus_delay: u32,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Default)]
@@ -277,6 +281,7 @@ fn default_right_click() -> ClickAction { ClickAction::Action(WindowAction::Menu
 fn default_middle_click() -> ClickAction { ClickAction::Action(WindowAction::CloseWindow) }
 
 fn default_modifier() -> ModifierKey { ModifierKey::Ctrl }
+fn default_drag_hover_delay() -> u32 { 500 }
 
 fn default_context_menu() -> Vec<ContextMenuItem> {
     vec![
@@ -464,5 +469,13 @@ impl Settings {
 
     pub fn multi_select_menu(&self) -> &[MultiSelectMenuItem] {
         &self.multi_select_menu
+    }
+
+    pub fn drag_hover_focus(&self) -> bool {
+        self.drag_hover_focus
+    }
+
+    pub fn drag_hover_focus_delay(&self) -> u32 {
+        self.drag_hover_focus_delay
     }
 }

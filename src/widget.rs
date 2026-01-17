@@ -676,18 +676,24 @@ impl WindowButton {
     fn setup_drag_reorder(&self) {
         tracing::info!("configuring drag-drop for window {}", self.window_id);
 
-        let drag_targets = vec![TargetEntry::new("text/plain", TargetFlags::SAME_APP, 0)];
+        let internal_targets = vec![TargetEntry::new("text/plain", TargetFlags::SAME_APP, 0)];
 
         self.gtk_button.drag_source_set(
             gtk::gdk::ModifierType::BUTTON1_MASK,
-            &drag_targets,
+            &internal_targets,
             gtk::gdk::DragAction::MOVE,
         );
 
+        let dest_targets = vec![
+            TargetEntry::new("text/plain", TargetFlags::SAME_APP, 0),
+            TargetEntry::new("text/uri-list", TargetFlags::OTHER_APP, 1),
+            TargetEntry::new("text/plain", TargetFlags::OTHER_APP, 2),
+        ];
+
         self.gtk_button.drag_dest_set(
-            DestDefaults::ALL,
-            &drag_targets,
-            gtk::gdk::DragAction::MOVE,
+            DestDefaults::MOTION | DestDefaults::HIGHLIGHT,
+            &dest_targets,
+            gtk::gdk::DragAction::MOVE | gtk::gdk::DragAction::COPY,
         );
 
         let initial_position = Rc::new(RefCell::new(0));
@@ -718,7 +724,42 @@ impl WindowButton {
             button_for_end.style_context().remove_class("dragging");
         });
 
+        let hover_timeout: Rc<RefCell<Option<gtk::glib::SourceId>>> = Rc::new(RefCell::new(None));
+        let timeout_for_motion = hover_timeout.clone();
+        let timeout_for_leave = hover_timeout.clone();
+        let timeout_for_drop = hover_timeout.clone();
+
+        let state_for_motion = self.state.clone();
+        let window_id_for_motion = self.window_id;
+        let button_for_motion = self.gtk_button.clone();
         self.gtk_button.connect_drag_motion(move |widget, ctx, _x, _y, _time| {
+            let is_external = ctx.drag_get_source_widget().is_none();
+
+            if is_external {
+                if state_for_motion.settings().drag_hover_focus() && timeout_for_motion.borrow().is_none() {
+                    button_for_motion.style_context().add_class("drag-over");
+
+                    let state = state_for_motion.clone();
+                    let wid = window_id_for_motion;
+                    let delay = state_for_motion.settings().drag_hover_focus_delay();
+                    let timeout_ref = timeout_for_motion.clone();
+
+                    let source_id = gtk::glib::timeout_add_local_once(
+                        Duration::from_millis(delay as u64),
+                        move || {
+                            tracing::debug!("drag hover focus triggered for window {}", wid);
+                            if let Err(e) = state.compositor().focus_window(wid) {
+                                tracing::error!("failed to focus window on drag hover: {}", e);
+                            }
+                            timeout_ref.borrow_mut().take();
+                        }
+                    );
+
+                    *timeout_for_motion.borrow_mut() = Some(source_id);
+                }
+                return true;
+            }
+
             if let Some(source) = ctx.drag_get_source_widget() {
                 if source != *widget {
                     if let Some(parent) = widget.parent() {
@@ -740,11 +781,34 @@ impl WindowButton {
         let button_for_leave = self.gtk_button.clone();
         self.gtk_button.connect_drag_leave(move |_, _, _| {
             button_for_leave.style_context().remove_class("drag-over");
+
+            if let Some(timeout_id) = timeout_for_leave.borrow_mut().take() {
+                timeout_id.remove();
+            }
         });
 
-        let state = self.state.clone();
+        let state_for_drop = self.state.clone();
         let pos_for_drop = initial_position.clone();
         let settings_for_drop = self.state.settings().clone();
+        self.gtk_button.connect_drag_drop(move |widget, ctx, _x, _y, time| {
+            if let Some(timeout_id) = timeout_for_drop.borrow_mut().take() {
+                timeout_id.remove();
+            }
+
+            let is_internal = ctx.drag_get_source_widget().is_some();
+
+            if is_internal {
+                let target = widget.drag_dest_find_target(ctx, None);
+                if let Some(target) = target {
+                    widget.drag_get_data(ctx, &target, time);
+                    return true;
+                }
+            }
+
+            false
+        });
+
+        let state = state_for_drop;
         self.gtk_button.connect_drag_data_received(move |_widget, ctx, _, _, data, _, time| {
             tracing::info!("drop received");
 
