@@ -55,6 +55,8 @@ The compiled module will be at `target/release/libniri_window_buttons.so`.
     "min_button_width": 150,
     "max_button_width": 235,
     "max_taskbar_width": 1200,
+    "drag_hover_focus": true,
+    "drag_hover_focus_delay": 500,
     "click_actions": {
       "left_click_unfocused": "focus-window",
       "left_click_focused": "maximize-column",
