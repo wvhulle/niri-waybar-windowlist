@@ -84,7 +84,12 @@ impl WindowButton {
         let layout_box = gtk::Box::new(Orientation::Horizontal, icon_gap);
 
         let title_label = gtk::Label::new(None);
-        title_label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        let truncate_titles = state.settings().truncate_titles();
+        if truncate_titles {
+            title_label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        } else {
+            title_label.set_ellipsize(gtk::pango::EllipsizeMode::None);
+        }
         title_label.set_xalign(0.0);
 
         let gtk_button = gtk::Button::new();
@@ -96,7 +101,7 @@ impl WindowButton {
         let max_width = state.settings().max_button_width(None);
         gtk_button.set_size_request(max_width, -1);
 
-        if display_titles {
+        if display_titles && truncate_titles {
             let icon_dim = state.settings().icon_size();
             let max_chars = (max_width - icon_dim - icon_gap - 16) / 8;
             title_label.set_max_width_chars(max_chars);
@@ -150,7 +155,12 @@ impl WindowButton {
 
         if self.display_titles {
             if let Some(text) = title {
-                self.title_label.set_text(text);
+                let display_text = if self.state.settings().allow_title_linebreaks() {
+                    text.to_string()
+                } else {
+                    text.replace('\n', " ").replace('\r', " ")
+                };
+                self.title_label.set_text(&display_text);
                 self.title_label.show();
             } else {
                 self.title_label.set_text("");
@@ -925,12 +935,12 @@ impl WindowButton {
         .map(|surface| gtk::Image::from_surface(Some(&surface)))
     }
 	pub fn resize_for_width(&self, width: i32) {
-		if self.display_titles {
+		if self.display_titles && self.state.settings().truncate_titles() {
 		    let icon_dim = self.state.settings().icon_size();
 		    let icon_gap = self.state.settings().icon_spacing();
 		    let max_chars = ((width - icon_dim - icon_gap - 16) / 8).max(0);
 		    self.title_label.set_max_width_chars(max_chars);
-		    
+
 		    if max_chars == 0 {
 		        self.title_label.hide();
 		    }

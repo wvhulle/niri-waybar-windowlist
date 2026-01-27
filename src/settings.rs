@@ -57,6 +57,10 @@ pub struct Settings {
     drag_hover_focus: bool,
     #[serde(default = "default_drag_hover_delay")]
     drag_hover_focus_delay: u32,
+    #[serde(default = "default_true")]
+    truncate_titles: bool,
+    #[serde(default)]
+    allow_title_linebreaks: bool,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Default)]
@@ -477,5 +481,13 @@ impl Settings {
 
     pub fn drag_hover_focus_delay(&self) -> u32 {
         self.drag_hover_focus_delay
+    }
+
+    pub fn truncate_titles(&self) -> bool {
+        self.truncate_titles
+    }
+
+    pub fn allow_title_linebreaks(&self) -> bool {
+        self.allow_title_linebreaks
     }
 }

@@ -50,6 +50,8 @@ The compiled module will be at `target/release/libniri_window_buttons.so`.
     "module_path": "/path/to/libniri_window_buttons.so",
     "only_current_workspace": false,
     "show_window_titles": true,
+    "truncate_titles": true,
+    "allow_title_linebreaks": false,
     "icon_size": 24,
     "icon_spacing": 6,
     "min_button_width": 150,
@@ -98,6 +100,8 @@ The compiled module will be at `target/release/libniri_window_buttons.so`.
 | `show_all_outputs` | Show windows from all monitors | `false` |
 | `only_current_workspace` | Show only current workspace windows | `false` |
 | `show_window_titles` | Display window titles next to icons | `true` |
+| `truncate_titles` | Truncate long titles with ellipsis | `true` |
+| `allow_title_linebreaks` | Allow line breaks in window titles (expands button height) | `false` |
 | `drag_hover_focus` | Focus window when external drag hovers over button | `true` |
 | `drag_hover_focus_delay` | Delay in milliseconds before hover triggers focus | `500` |
 
