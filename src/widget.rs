@@ -31,6 +31,7 @@ pub struct WindowButton {
     window_id: u64,
     title: Rc<RefCell<Option<String>>>,
     selection: SelectionState,
+    tooltip_timeout: Rc<RefCell<Option<gtk::glib::SourceId>>>,
 }
 
 impl Debug for WindowButton {
@@ -96,7 +97,12 @@ impl WindowButton {
         gtk_button.set_always_show_image(true);
         gtk_button.set_relief(ReliefStyle::None);
         gtk_button.add(&layout_box);
-        gtk_button.add_events(gtk::gdk::EventMask::SCROLL_MASK | gtk::gdk::EventMask::SMOOTH_SCROLL_MASK);
+        gtk_button.add_events(
+            gtk::gdk::EventMask::SCROLL_MASK |
+            gtk::gdk::EventMask::SMOOTH_SCROLL_MASK |
+            gtk::gdk::EventMask::ENTER_NOTIFY_MASK |
+            gtk::gdk::EventMask::LEAVE_NOTIFY_MASK
+        );
 
         let max_width = state.settings().max_button_width(None);
         gtk_button.set_size_request(max_width, -1);
@@ -124,11 +130,13 @@ impl WindowButton {
             window_id: window.id,
             title: Rc::new(RefCell::new(window.title.clone())),
             selection,
+            tooltip_timeout: Rc::new(RefCell::new(None)),
         };
 
         button.setup_click_handlers(window.id);
         button.setup_drag_reorder();
         button.setup_icon_rendering(icon_location);
+        button.setup_tooltip();
 
         button
     }
@@ -150,8 +158,6 @@ impl WindowButton {
         if let Some(t) = title {
             *self.title.borrow_mut() = Some(t.to_string());
         }
-
-        self.gtk_button.set_tooltip_text(title);
 
         if self.display_titles {
             if let Some(text) = title {
@@ -680,6 +686,7 @@ impl WindowButton {
 		    window_id: self.window_id,
 		    title: self.title.clone(),
 		    selection: self.selection.clone(),
+		    tooltip_timeout: self.tooltip_timeout.clone(),
 		}
 	}
 
@@ -934,6 +941,47 @@ impl WindowButton {
         .and_then(|pixbuf| pixbuf.create_surface(0, button.window().as_ref()))
         .map(|surface| gtk::Image::from_surface(Some(&surface)))
     }
+
+    fn setup_tooltip(&self) {
+        if !self.state.settings().show_tooltip() {
+            return;
+        }
+
+        let delay = self.state.settings().tooltip_delay();
+        let title = self.title.clone();
+        let tooltip_timeout = self.tooltip_timeout.clone();
+
+        self.gtk_button.connect_enter_notify_event(move |btn, _| {
+            let title_clone = title.clone();
+            let btn_clone = btn.clone();
+            let timeout_ref = tooltip_timeout.clone();
+
+            let source_id = gtk::glib::timeout_add_local_once(
+                Duration::from_millis(delay as u64),
+                move || {
+                    if let Some(ref text) = *title_clone.borrow() {
+                        btn_clone.set_tooltip_text(Some(text));
+                        btn_clone.trigger_tooltip_query();
+                    }
+                    timeout_ref.borrow_mut().take();
+                }
+            );
+
+            *tooltip_timeout.borrow_mut() = Some(source_id);
+            gtk::glib::Propagation::Proceed
+        });
+
+        let tooltip_timeout_leave = self.tooltip_timeout.clone();
+        let button_leave = self.gtk_button.clone();
+        self.gtk_button.connect_leave_notify_event(move |_, _| {
+            if let Some(timeout_id) = tooltip_timeout_leave.borrow_mut().take() {
+                timeout_id.remove();
+            }
+            button_leave.set_tooltip_text(None);
+            gtk::glib::Propagation::Proceed
+        });
+    }
+
 	pub fn resize_for_width(&self, width: i32) {
 		if self.display_titles && self.state.settings().truncate_titles() {
 		    let icon_dim = self.state.settings().icon_size();

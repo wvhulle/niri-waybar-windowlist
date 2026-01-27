@@ -61,6 +61,10 @@ pub struct Settings {
     truncate_titles: bool,
     #[serde(default)]
     allow_title_linebreaks: bool,
+    #[serde(default = "default_true")]
+    show_tooltip: bool,
+    #[serde(default = "default_tooltip_delay")]
+    tooltip_delay: u32,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Default)]
@@ -286,6 +290,7 @@ fn default_middle_click() -> ClickAction { ClickAction::Action(WindowAction::Clo
 
 fn default_modifier() -> ModifierKey { ModifierKey::Ctrl }
 fn default_drag_hover_delay() -> u32 { 500 }
+fn default_tooltip_delay() -> u32 { 300 }
 
 fn default_context_menu() -> Vec<ContextMenuItem> {
     vec![
@@ -489,5 +494,13 @@ impl Settings {
 
     pub fn allow_title_linebreaks(&self) -> bool {
         self.allow_title_linebreaks
+    }
+
+    pub fn show_tooltip(&self) -> bool {
+        self.show_tooltip
+    }
+
+    pub fn tooltip_delay(&self) -> u32 {
+        self.tooltip_delay
     }
 }

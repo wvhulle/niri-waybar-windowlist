@@ -104,6 +104,8 @@ The compiled module will be at `target/release/libniri_window_buttons.so`.
 | `allow_title_linebreaks` | Allow line breaks in window titles (expands button height) | `false` |
 | `drag_hover_focus` | Focus window when external drag hovers over button | `true` |
 | `drag_hover_focus_delay` | Delay in milliseconds before hover triggers focus | `500` |
+| `show_tooltip` | Show window title tooltip on hover | `true` |
+| `tooltip_delay` | Delay in milliseconds before tooltip appears | `300` |
 
 ### Size Controls
 
