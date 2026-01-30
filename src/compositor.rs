@@ -1,36 +1,7 @@
-use std::{collections::HashMap, io::{BufRead, BufReader, Write as _}, net::Shutdown, ops::Deref, os::unix::net::UnixStream, sync::{Arc, Mutex}};
+use std::{collections::HashMap, ops::Deref};
 use async_channel::{Receiver, Sender};
 use niri_ipc::{Action, Event, Output, Reply, Request, Workspace, socket::Socket};
 use crate::{errors::ModuleError, settings::Settings};
-
-/// A handle that can interrupt a blocking event stream by shutting down the underlying socket.
-#[derive(Clone)]
-pub struct StreamShutdownHandle {
-    stream: Arc<Mutex<Option<UnixStream>>>,
-}
-
-impl StreamShutdownHandle {
-    fn new() -> Self {
-        Self {
-            stream: Arc::new(Mutex::new(None)),
-        }
-    }
-
-    fn store(&self, s: UnixStream) {
-        if let Ok(mut guard) = self.stream.lock() {
-            *guard = Some(s);
-        }
-    }
-
-    /// Shut down the socket, causing any blocking read to return an error.
-    pub fn interrupt(&self) {
-        if let Ok(mut guard) = self.stream.lock() {
-            if let Some(s) = guard.take() {
-                let _ = s.shutdown(Shutdown::Both);
-            }
-        }
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct CompositorClient {
@@ -380,66 +351,52 @@ fn validate_handled(response: Reply) -> Result<(), ModuleError> {
 
 pub struct WindowEventStream {
     receiver: Receiver<WindowSnapshot>,
-    shutdown_handle: StreamShutdownHandle,
 }
 
 impl WindowEventStream {
     fn start(filter_workspace: bool) -> Self {
         let (tx, rx) = async_channel::unbounded();
-        let shutdown_handle = StreamShutdownHandle::new();
-        let handle = shutdown_handle.clone();
         std::thread::spawn(move || {
-            if let Err(e) = run_window_stream(tx, filter_workspace, &handle) {
+            if let Err(e) = run_window_stream(tx, filter_workspace) {
                 tracing::error!(%e, "window event stream terminated");
             }
         });
 
-        Self { receiver: rx, shutdown_handle }
+        Self { receiver: rx }
     }
 
     pub async fn next_snapshot(&self) -> Option<WindowSnapshot> {
         self.receiver.recv().await.ok()
     }
-
-    pub fn shutdown_handle(&self) -> &StreamShutdownHandle {
-        &self.shutdown_handle
-    }
 }
 
 pub struct WorkspaceEventStream {
     receiver: Receiver<Vec<Workspace>>,
-    shutdown_handle: StreamShutdownHandle,
 }
 
 impl WorkspaceEventStream {
     fn start() -> Self {
         let (tx, rx) = async_channel::unbounded();
-        let shutdown_handle = StreamShutdownHandle::new();
-        let handle = shutdown_handle.clone();
         std::thread::spawn(move || {
-            if let Err(e) = run_workspace_stream(tx, &handle) {
+            if let Err(e) = run_workspace_stream(tx) {
                 tracing::error!(%e, "workspace event stream terminated");
             }
         });
 
-        Self { receiver: rx, shutdown_handle }
+        Self { receiver: rx }
     }
 
     pub async fn next_workspaces(&self) -> Option<Vec<Workspace>> {
         self.receiver.recv().await.ok()
     }
-
-    pub fn shutdown_handle(&self) -> &StreamShutdownHandle {
-        &self.shutdown_handle
-    }
 }
 
-fn run_workspace_stream(tx: Sender<Vec<Workspace>>, handle: &StreamShutdownHandle) -> Result<(), ModuleError> {
+fn run_workspace_stream(tx: Sender<Vec<Workspace>>) -> Result<(), ModuleError> {
     const MAX_BACKOFF_SECS: u64 = 30;
     let mut backoff_secs = 1u64;
 
     loop {
-        match try_run_workspace_stream(&tx, handle) {
+        match try_run_workspace_stream(&tx) {
             Ok(()) | Err(ModuleError::SnapshotChannelClosed) => {
                 tracing::info!("workspace event stream ended");
                 return Ok(());
@@ -453,38 +410,34 @@ fn run_workspace_stream(tx: Sender<Vec<Workspace>>, handle: &StreamShutdownHandl
     }
 }
 
-fn try_run_workspace_stream(tx: &Sender<Vec<Workspace>>, handle: &StreamShutdownHandle) -> Result<(), ModuleError> {
-    let reader = connect_event_stream(handle)?;
-    let mut buf_reader = BufReader::new(reader);
-    let mut line = String::new();
+fn try_run_workspace_stream(tx: &Sender<Vec<Workspace>>) -> Result<(), ModuleError> {
+    let mut socket = connect_socket()?;
+    let response = socket.send(Request::EventStream).map_err(ModuleError::CompositorIpc)?;
+    validate_handled(response)?;
 
     tracing::info!("workspace event stream connected");
+    let mut event_reader = socket.read_events();
 
     loop {
-        line.clear();
-        let bytes = buf_reader.read_line(&mut line).map_err(ModuleError::CompositorIpc)?;
-        if bytes == 0 {
-            return Err(ModuleError::CompositorIpc(std::io::Error::new(
-                std::io::ErrorKind::UnexpectedEof,
-                "event stream closed",
-            )));
-        }
-        let event: Event = serde_json::from_str(line.trim())
-            .map_err(|e| ModuleError::CompositorIpc(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))?;
-
-        if let Event::WorkspacesChanged { workspaces } = event {
-            tx.send_blocking(workspaces).map_err(|_| ModuleError::SnapshotChannelClosed)?;
+        match event_reader() {
+            Ok(Event::WorkspacesChanged { workspaces }) => {
+                tx.send_blocking(workspaces).map_err(|_| ModuleError::SnapshotChannelClosed)?;
+            }
+            Ok(_) => {}
+            Err(e) => {
+                return Err(ModuleError::CompositorIpc(e));
+            }
         }
     }
 }
 
-fn run_window_stream(tx: Sender<WindowSnapshot>, filter_workspace: bool, handle: &StreamShutdownHandle) -> Result<(), ModuleError> {
+fn run_window_stream(tx: Sender<WindowSnapshot>, filter_workspace: bool) -> Result<(), ModuleError> {
     const MAX_BACKOFF_SECS: u64 = 30;
     let mut backoff_secs = 1u64;
     let mut window_state = WindowTracker::new();
 
     loop {
-        match try_run_window_stream(&tx, &mut window_state, filter_workspace, handle) {
+        match try_run_window_stream(&tx, &mut window_state, filter_workspace) {
             Ok(()) | Err(ModuleError::SnapshotChannelClosed) => {
                 tracing::info!("window event stream ended");
                 return Ok(());
@@ -502,61 +455,26 @@ fn try_run_window_stream(
     tx: &Sender<WindowSnapshot>,
     window_state: &mut WindowTracker,
     filter_workspace: bool,
-    handle: &StreamShutdownHandle,
 ) -> Result<(), ModuleError> {
-    let reader = connect_event_stream(handle)?;
-    let mut buf_reader = BufReader::new(reader);
-    let mut line = String::new();
+    let mut socket = connect_socket()?;
+    let response = socket.send(Request::EventStream).map_err(ModuleError::CompositorIpc)?;
+    validate_handled(response)?;
 
     tracing::info!("window event stream connected");
+    let mut event_reader = socket.read_events();
 
     loop {
-        line.clear();
-        let bytes = buf_reader.read_line(&mut line).map_err(ModuleError::CompositorIpc)?;
-        if bytes == 0 {
-            return Err(ModuleError::CompositorIpc(std::io::Error::new(
-                std::io::ErrorKind::UnexpectedEof,
-                "event stream closed",
-            )));
-        }
-        let event: Event = serde_json::from_str(line.trim())
-            .map_err(|e| ModuleError::CompositorIpc(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))?;
-
-        if let Some(snapshot) = window_state.process_event(event, filter_workspace) {
-            tx.send_blocking(snapshot).map_err(|_| ModuleError::SnapshotChannelClosed)?;
+        match event_reader() {
+            Ok(event) => {
+                if let Some(snapshot) = window_state.process_event(event, filter_workspace) {
+                    tx.send_blocking(snapshot).map_err(|_| ModuleError::SnapshotChannelClosed)?;
+                }
+            }
+            Err(e) => {
+                return Err(ModuleError::CompositorIpc(e));
+            }
         }
     }
-}
-
-/// Connect to niri socket manually, perform the EventStream handshake,
-/// and return a stream for reading. The shutdown handle stores a clone for interruption.
-fn connect_event_stream(handle: &StreamShutdownHandle) -> Result<UnixStream, ModuleError> {
-    let socket_path = std::env::var("NIRI_SOCKET")
-        .map_err(|_| ModuleError::CompositorIpc(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "NIRI_SOCKET environment variable not set",
-        )))?;
-
-    let mut stream = UnixStream::connect(&socket_path).map_err(ModuleError::CompositorIpc)?;
-
-    // Send EventStream request
-    let request = serde_json::to_string(&Request::EventStream)
-        .map_err(|e| ModuleError::CompositorIpc(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))?;
-    writeln!(stream, "{}", request).map_err(ModuleError::CompositorIpc)?;
-
-    // Read and validate response
-    let mut response_line = String::new();
-    let mut reader = BufReader::new(&stream);
-    reader.read_line(&mut response_line).map_err(ModuleError::CompositorIpc)?;
-    let reply: Result<niri_ipc::Response, String> = serde_json::from_str(response_line.trim())
-        .map_err(|e| ModuleError::CompositorIpc(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))?;
-    validate_handled(reply)?;
-
-    // Store a clone for shutdown; return original for reading
-    let shutdown_stream = stream.try_clone().map_err(ModuleError::CompositorIpc)?;
-    handle.store(shutdown_stream);
-
-    Ok(stream)
 }
 
 #[derive(Debug)]
