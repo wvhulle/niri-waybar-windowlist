@@ -3,9 +3,10 @@ use async_channel::Sender;
 use futures::{Stream, StreamExt};
 use waybar_cffi::gtk::glib;
 use crate::{
-    compositor::{CompositorClient, WindowSnapshot, WorkspaceEventStream},
+    compositor::{CompositorClient, StreamShutdownHandle, WindowSnapshot, WorkspaceEventStream},
     icons::IconResolver,
     notifications::{self, NotificationData},
+    session,
     settings::Settings,
 };
 
@@ -47,8 +48,15 @@ impl SharedState {
             glib::spawn_future_local(forward_notifications(tx.clone()));
         }
 
-        glib::spawn_future_local(forward_window_updates(tx.clone(), self.compositor().create_window_stream()));
-        glib::spawn_future_local(forward_workspace_changes(tx, self.compositor().create_workspace_stream()));
+        let window_stream = self.compositor().create_window_stream();
+        let workspace_stream = self.compositor().create_workspace_stream();
+
+        let window_handle = window_stream.shutdown_handle().clone();
+        let workspace_handle = workspace_stream.shutdown_handle().clone();
+
+        glib::spawn_future_local(forward_window_updates(tx.clone(), window_stream));
+        glib::spawn_future_local(forward_workspace_changes(tx, workspace_stream));
+        glib::spawn_future_local(watch_session_unlock(window_handle, workspace_handle));
 
         async_stream::stream! {
             while let Ok(event) = rx.recv().await {
@@ -86,5 +94,14 @@ async fn forward_workspace_changes(tx: Sender<EventMessage>, stream: WorkspaceEv
         if let Err(e) = tx.send(EventMessage::Workspaces(())).await {
             tracing::error!(%e, "failed to forward workspace change");
         }
+    }
+}
+
+async fn watch_session_unlock(window_handle: StreamShutdownHandle, workspace_handle: StreamShutdownHandle) {
+    let mut unlock = Box::pin(session::unlock_stream());
+    while unlock.next().await.is_some() {
+        tracing::info!("session unlocked, interrupting event streams to force reconnection");
+        window_handle.interrupt();
+        workspace_handle.interrupt();
     }
 }

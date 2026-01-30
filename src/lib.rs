@@ -18,6 +18,7 @@ mod global;
 mod icons;
 mod notifications;
 mod screen;
+mod session;
 mod settings;
 mod system;
 mod widget;
