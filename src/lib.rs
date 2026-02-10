@@ -4,7 +4,7 @@ use std::{
 };
 
 use futures::StreamExt;
-use settings::Settings;
+use settings::{Settings, ButtonAlignment};
 use tracing_subscriber::{EnvFilter, fmt::format::FmtSpan};
 use waybar_cffi::{
     Module,
@@ -86,6 +86,11 @@ async fn initialize_module(info: &waybar_cffi::InitInfo, state: SharedState) -> 
     let button_container = gtk::Box::new(Orientation::Horizontal, 0);
     button_container.style_context().add_class("niri-window-buttons");
     button_container.add_events(EventMask::SCROLL_MASK | EventMask::SMOOTH_SCROLL_MASK);
+
+    let alignment_spacer = gtk::Box::new(Orientation::Horizontal, 0);
+    alignment_spacer.set_size_request(0, 0);
+    button_container.add(&alignment_spacer);
+
     scrolled.add(&button_container);
 
     set_taskbar_adjustment(scrolled.hadjustment());
@@ -198,7 +203,7 @@ async fn initialize_module(info: &waybar_cffi::InitInfo, state: SharedState) -> 
     let context = MainContext::default();
     let main_container_clone = main_container.clone();
     context.spawn_local(async move {
-        ModuleInstance::create(state, button_container, scrolled, main_container_clone).run_event_loop().await
+        ModuleInstance::create(state, button_container, scrolled, main_container_clone, alignment_spacer).run_event_loop().await
     });
 
     Ok(())
@@ -244,6 +249,7 @@ struct ModuleInstance {
     container: gtk::Box,
     scrolled_window: ScrolledWindow,
     main_container: gtk::Box,
+    alignment_spacer: gtk::Box,
     previous_snapshot: Option<WindowSnapshot>,
     current_output: Option<String>,
     previous_focused: Option<u64>,
@@ -252,12 +258,13 @@ struct ModuleInstance {
 }
 
 impl ModuleInstance {
-    fn create(state: SharedState, container: gtk::Box, scrolled_window: ScrolledWindow, main_container: gtk::Box) -> Self {
+    fn create(state: SharedState, container: gtk::Box, scrolled_window: ScrolledWindow, main_container: gtk::Box, alignment_spacer: gtk::Box) -> Self {
         Self {
             buttons: BTreeMap::new(),
             container,
             scrolled_window,
             main_container,
+            alignment_spacer,
             previous_snapshot: None,
             current_output: None,
             previous_focused: None,
@@ -577,7 +584,7 @@ impl ModuleInstance {
             let min_width = self.state.settings().min_button_width(output);
             let max_width = self.state.settings().max_button_width(output);
             let total_limit = self.state.settings().max_taskbar_width_for_output(output);
-            
+
             let final_width = if max_width * button_count > total_limit {
                 (total_limit / button_count).max(min_width).max(1)
             } else {
@@ -588,6 +595,19 @@ impl ModuleInstance {
                 button.get_widget().set_size_request(final_width, -1);
                 button.resize_for_width(final_width);
             }
+
+            let total_buttons_width = final_width * button_count;
+            let page_size = self.scrolled_window.hadjustment().page_size() as i32;
+            let available_width = if page_size > 0 { page_size } else { total_limit };
+            let spacer_width = match self.state.settings().button_alignment() {
+                ButtonAlignment::Left => 0,
+                ButtonAlignment::Center => ((available_width - total_buttons_width) / 2).max(0),
+                ButtonAlignment::Right => (available_width - total_buttons_width).max(0),
+            };
+            self.alignment_spacer.set_size_request(spacer_width, 0);
+            self.container.reorder_child(&self.alignment_spacer, 0);
+        } else {
+            self.alignment_spacer.set_size_request(0, 0);
         }
 
         self.container.show_all();

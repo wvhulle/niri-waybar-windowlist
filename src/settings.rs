@@ -65,6 +65,8 @@ pub struct Settings {
     show_tooltip: bool,
     #[serde(default = "default_tooltip_delay")]
     tooltip_delay: u32,
+    #[serde(default)]
+    button_alignment: ButtonAlignment,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Default)]
@@ -75,6 +77,15 @@ pub enum ModifierKey {
     Shift,
     Alt,
     Super,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ButtonAlignment {
+    #[default]
+    Left,
+    Center,
+    Right,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -502,5 +513,9 @@ impl Settings {
 
     pub fn tooltip_delay(&self) -> u32 {
         self.tooltip_delay
+    }
+
+    pub fn button_alignment(&self) -> ButtonAlignment {
+        self.button_alignment
     }
 }

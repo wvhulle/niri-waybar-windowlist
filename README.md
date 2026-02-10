@@ -52,6 +52,7 @@ The compiled module will be at `target/release/libniri_window_buttons.so`.
     "show_window_titles": true,
     "truncate_titles": true,
     "allow_title_linebreaks": false,
+    "button_alignment": "left",
     "icon_size": 24,
     "icon_spacing": 6,
     "min_button_width": 150,
@@ -106,6 +107,7 @@ The compiled module will be at `target/release/libniri_window_buttons.so`.
 | `drag_hover_focus_delay` | Delay in milliseconds before hover triggers focus | `500` |
 | `show_tooltip` | Show window title tooltip on hover | `true` |
 | `tooltip_delay` | Delay in milliseconds before tooltip appears | `300` |
+| `button_alignment` | Align buttons within the taskbar: `"left"`, `"center"`, or `"right"` | `"left"` |
 
 ### Size Controls
 
