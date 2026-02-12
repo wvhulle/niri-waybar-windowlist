@@ -67,6 +67,8 @@ pub struct Settings {
     tooltip_delay: u32,
     #[serde(default)]
     button_alignment: ButtonAlignment,
+    #[serde(default)]
+    left_click_focus_on_press: bool,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Default)]
@@ -517,5 +519,9 @@ impl Settings {
 
     pub fn button_alignment(&self) -> ButtonAlignment {
         self.button_alignment
+    }
+
+    pub fn left_click_focus_on_press(&self) -> bool {
+        self.left_click_focus_on_press
     }
 }

@@ -108,6 +108,7 @@ The compiled module will be at `target/release/libniri_window_buttons.so`.
 | `show_tooltip` | Show window title tooltip on hover | `true` |
 | `tooltip_delay` | Delay in milliseconds before tooltip appears | `300` |
 | `button_alignment` | Align buttons within the taskbar: `"left"`, `"center"`, or `"right"` | `"left"` |
+| `left_click_focus_on_press` | Focus unfocused windows on mouse-down instead of mouse-up. Faster response but may briefly focus a window before drag-and-drop starts | `false` |
 
 ### Size Controls
 

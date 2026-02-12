@@ -32,6 +32,7 @@ pub struct WindowButton {
     title: Rc<RefCell<Option<String>>>,
     selection: SelectionState,
     tooltip_timeout: Rc<RefCell<Option<gtk::glib::SourceId>>>,
+    skip_clicked: Rc<RefCell<bool>>,
 }
 
 impl Debug for WindowButton {
@@ -131,6 +132,7 @@ impl WindowButton {
             title: Rc::new(RefCell::new(window.title.clone())),
             selection,
             tooltip_timeout: Rc::new(RefCell::new(None)),
+            skip_clicked: Rc::new(RefCell::new(false)),
         };
 
         button.setup_click_handlers(window.id);
@@ -201,24 +203,15 @@ impl WindowButton {
 
 	fn setup_click_handlers(&self, window_id: u64) {
 		let state = self.state.clone();
-		let state_select = self.state.clone();
-		let state_middle = self.state.clone();
-		let state_right = self.state.clone();
 		let button_ref = self.gtk_button.clone();
-		let button_ref_select = self.gtk_button.clone();
 		let last_click_time = Rc::new(RefCell::new(Instant::now() - Duration::from_secs(1)));
-		let skip_clicked = Rc::new(RefCell::new(false));
-		let skip_clicked_press = skip_clicked.clone();
-		let skip_clicked_click = skip_clicked.clone();
+		let skip_clicked_press = self.skip_clicked.clone();
+		let skip_clicked_click = self.skip_clicked.clone();
 		let app_id = self.app_id.clone();
-		let app_id_middle = self.app_id.clone();
-		let app_id_right = self.app_id.clone();
 		let title = self.title.clone();
-		let selection = self.selection.clone();
-		let selection_right = self.selection.clone();
+		let selection_left = self.selection.clone();
 
 		let title_clone = title.clone();
-		let selection_left = selection.clone();
 		self.gtk_button.connect_clicked(move |_| {
 		    if *skip_clicked_click.borrow() {
 		        *skip_clicked_click.borrow_mut() = false;
@@ -251,34 +244,45 @@ impl WindowButton {
 		    }
 		});
 
+		let state_press = self.state.clone();
+		let button_ref_press = self.gtk_button.clone();
+		let app_id_press = self.app_id.clone();
+		let title_press = title.clone();
+		let selection_press = self.selection.clone();
+		let menu_self = self.clone_for_menu();
+
 		self.gtk_button.connect_button_press_event(move |btn, event| {
 		    if event.button() == 1 {
-		        let modifier_held = Self::check_modifier(btn, state_select.settings().multi_select_modifier());
+		        let modifier_held = Self::check_modifier(btn, state_press.settings().multi_select_modifier());
 		        if modifier_held {
 		            *skip_clicked_press.borrow_mut() = true;
-		            let mut sel = selection.borrow_mut();
+		            let mut sel = selection_press.borrow_mut();
 		            if sel.contains_key(&window_id) {
 		                sel.remove(&window_id);
-		                button_ref_select.style_context().remove_class("selected");
+		                button_ref_press.style_context().remove_class("selected");
 		            } else {
-		                sel.insert(window_id, button_ref_select.clone());
-		                button_ref_select.style_context().add_class("selected");
+		                sel.insert(window_id, button_ref_press.clone());
+		                button_ref_press.style_context().add_class("selected");
+		            }
+		        } else if state_press.settings().left_click_focus_on_press() {
+		            let is_currently_focused = button_ref_press.style_context().has_class("focused");
+		            if !is_currently_focused {
+		                *skip_clicked_press.borrow_mut() = true;
+		                clear_selection(&selection_press);
+		                let app_id_ref = app_id_press.as_deref();
+		                let title_ref = title_press.borrow();
+		                let title_str = title_ref.as_deref();
+		                let actions = state_press.settings().get_click_actions(app_id_ref, title_str);
+		                Self::execute_click_action(&state_press, window_id, &actions.left_click_unfocused, app_id_ref, title_str);
 		            }
 		        }
-		    }
-		    gtk::glib::Propagation::Proceed
-		});
-
-		let menu_self = self.clone_for_menu();
-		let title_middle = title.clone();
-		let button_ref_middle = self.gtk_button.clone();
-		self.gtk_button.connect_button_release_event(move |_, event| {
-		    let is_currently_focused = button_ref_middle.style_context().has_class("focused");
-		    if event.button() == 2 {
-		        let app_id_ref = app_id_middle.as_deref();
-		        let title_ref = title_middle.borrow();
+		        gtk::glib::Propagation::Proceed
+		    } else if event.button() == 2 {
+		        let is_currently_focused = button_ref_press.style_context().has_class("focused");
+		        let app_id_ref = app_id_press.as_deref();
+		        let title_ref = title_press.borrow();
 		        let title_str = title_ref.as_deref();
-		        let actions = state_middle.settings().get_click_actions(app_id_ref, title_str);
+		        let actions = state_press.settings().get_click_actions(app_id_ref, title_str);
 		        let action = if is_currently_focused {
 		            &actions.middle_click_focused
 		        } else {
@@ -287,18 +291,19 @@ impl WindowButton {
 		        if action.is_menu() {
 		            menu_self.display_context_menu(window_id);
 		        } else {
-		            Self::execute_click_action(&state_middle, window_id, action, app_id_ref, title_str);
+		            Self::execute_click_action(&state_press, window_id, action, app_id_ref, title_str);
 		        }
 		        gtk::glib::Propagation::Stop
 		    } else if event.button() == 3 {
-		        let selection_count = selection_right.borrow().len();
+		        let selection_count = selection_press.borrow().len();
 		        if selection_count > 0 {
 		            menu_self.display_multi_select_menu();
 		        } else {
-		            let app_id_ref = app_id_right.as_deref();
-		            let title_ref = title_middle.borrow();
+		            let is_currently_focused = button_ref_press.style_context().has_class("focused");
+		            let app_id_ref = app_id_press.as_deref();
+		            let title_ref = title_press.borrow();
 		            let title_str = title_ref.as_deref();
-		            let actions = state_right.settings().get_click_actions(app_id_ref, title_str);
+		            let actions = state_press.settings().get_click_actions(app_id_ref, title_str);
 		            let action = if is_currently_focused {
 		                &actions.right_click_focused
 		            } else {
@@ -307,7 +312,7 @@ impl WindowButton {
 		            if action.is_menu() {
 		                menu_self.display_context_menu(window_id);
 		            } else {
-		                Self::execute_click_action(&state_right, window_id, action, app_id_ref, title_str);
+		                Self::execute_click_action(&state_press, window_id, action, app_id_ref, title_str);
 		            }
 		        }
 		        gtk::glib::Propagation::Stop
@@ -687,6 +692,7 @@ impl WindowButton {
 		    title: self.title.clone(),
 		    selection: self.selection.clone(),
 		    tooltip_timeout: self.tooltip_timeout.clone(),
+		    skip_clicked: self.skip_clicked.clone(),
 		}
 	}
 
@@ -736,9 +742,11 @@ impl WindowButton {
         });
 
         let button_for_end = self.gtk_button.clone();
+        let skip_clicked_drag = self.skip_clicked.clone();
         self.gtk_button.connect_drag_end(move |_, _| {
             tracing::info!("drag completed");
             button_for_end.style_context().remove_class("dragging");
+            *skip_clicked_drag.borrow_mut() = false;
         });
 
         let hover_timeout: Rc<RefCell<Option<gtk::glib::SourceId>>> = Rc::new(RefCell::new(None));
