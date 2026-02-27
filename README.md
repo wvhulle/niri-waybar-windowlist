@@ -90,6 +90,12 @@ The compiled module will be at `target/release/libniri_window_buttons.so`.
       "use_desktop_entry": true,
       "use_fuzzy_matching": false
     },
+    "audio_indicator": {
+      "enabled": false,
+      "playing_icon": "󰕾",
+      "muted_icon": "󰖁",
+      "clickable": true
+    },
     "apps": {}
   }
 }
