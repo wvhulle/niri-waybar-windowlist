@@ -69,6 +69,8 @@ pub struct Settings {
     button_alignment: ButtonAlignment,
     #[serde(default)]
     left_click_focus_on_press: bool,
+    #[serde(default)]
+    audio_indicator: AudioIndicatorConfig,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Default)]
@@ -79,6 +81,29 @@ pub enum ModifierKey {
     Shift,
     Alt,
     Super,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct AudioIndicatorConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_audio_playing_icon")]
+    pub playing_icon: String,
+    #[serde(default = "default_audio_muted_icon")]
+    pub muted_icon: String,
+    #[serde(default = "default_true")]
+    pub clickable: bool,
+}
+
+impl Default for AudioIndicatorConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            playing_icon: default_audio_playing_icon(),
+            muted_icon: default_audio_muted_icon(),
+            clickable: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Default)]
@@ -304,6 +329,8 @@ fn default_middle_click() -> ClickAction { ClickAction::Action(WindowAction::Clo
 fn default_modifier() -> ModifierKey { ModifierKey::Ctrl }
 fn default_drag_hover_delay() -> u32 { 500 }
 fn default_tooltip_delay() -> u32 { 300 }
+fn default_audio_playing_icon() -> String { "󰕾".to_string() }
+fn default_audio_muted_icon() -> String { "󰖁".to_string() }
 
 fn default_context_menu() -> Vec<ContextMenuItem> {
     vec![
@@ -523,5 +550,9 @@ impl Settings {
 
     pub fn left_click_focus_on_press(&self) -> bool {
         self.left_click_focus_on_press
+    }
+
+    pub fn audio_indicator(&self) -> &AudioIndicatorConfig {
+        &self.audio_indicator
     }
 }

@@ -1,10 +1,11 @@
 use std::{cell::RefCell, collections::HashMap, fmt::Debug, path::PathBuf, process::Command, rc::Rc, time::{Duration, Instant}};
 use waybar_cffi::gtk::{
-    self as gtk, CssProvider, IconLookupFlags, IconSize, IconTheme, Menu, MenuItem, Orientation, ReliefStyle,
+    self as gtk, CssProvider, EventBox, IconLookupFlags, IconSize, IconTheme, Menu, MenuItem, Orientation, ReliefStyle,
     gdk_pixbuf::Pixbuf,
     prelude::{AdjustmentExt, BoxExt, ButtonExt, Cast, ContainerExt, CssProviderExt, DragContextExtManual, GdkPixbufExt, GtkMenuExt, GtkMenuItemExt, IconThemeExt, LabelExt, MenuShellExt, StyleContextExt, WidgetExt, WidgetExtManual},
     DestDefaults, TargetEntry, TargetFlags,
 };
+use crate::audio::SinkInput;
 use crate::global::SharedState;
 use crate::settings::{ModifierKey, MultiSelectAction};
 
@@ -26,6 +27,9 @@ pub struct WindowButton {
     gtk_button: gtk::Button,
     layout_box: gtk::Box,
     title_label: gtk::Label,
+    audio_event_box: EventBox,
+    audio_label: gtk::Label,
+    audio_sink_inputs: Rc<RefCell<Vec<(u32, bool)>>>,
     display_titles: bool,
     state: SharedState,
     window_id: u64,
@@ -41,7 +45,7 @@ impl Debug for WindowButton {
             .field("app_id", &self.app_id)
             .field("display_titles", &self.display_titles)
             .field("window_id", &self.window_id)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -121,11 +125,26 @@ impl WindowButton {
         let app_id = window.app_id.clone();
         let icon_location = app_id.as_deref().and_then(|id| state_clone.icon_resolver().resolve(id));
 
+        let audio_label = gtk::Label::new(None);
+        audio_label.show();
+        let audio_event_box = EventBox::new();
+        audio_event_box.add(&audio_label);
+        audio_event_box.set_no_show_all(true);
+        audio_event_box.style_context().add_class("audio-indicator");
+        BUTTON_STYLES.with(|provider| {
+            audio_event_box.style_context().add_provider(provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+        });
+
+        let audio_sink_inputs = Rc::new(RefCell::new(Vec::<(u32, bool)>::new()));
+
         let button = Self {
             app_id,
             gtk_button,
             layout_box,
             title_label,
+            audio_event_box,
+            audio_label,
+            audio_sink_inputs,
             display_titles,
             state: state_clone,
             window_id: window.id,
@@ -136,6 +155,7 @@ impl WindowButton {
         };
 
         button.setup_click_handlers(window.id);
+        button.setup_audio_click_handler();
         button.setup_drag_reorder();
         button.setup_icon_rendering(icon_location);
         button.setup_tooltip();
@@ -199,6 +219,49 @@ impl WindowButton {
 
     pub fn get_widget(&self) -> &gtk::Button {
         &self.gtk_button
+    }
+
+    pub fn update_audio_state(&self, sink_inputs: &[SinkInput]) {
+        if !self.state.settings().audio_indicator().enabled {
+            return;
+        }
+
+        if sink_inputs.is_empty() {
+            self.audio_event_box.hide();
+            self.audio_sink_inputs.borrow_mut().clear();
+            return;
+        }
+
+        let all_muted = sink_inputs.iter().all(|s| s.muted);
+        let config = self.state.settings().audio_indicator();
+        let icon = if all_muted { config.muted_icon.as_str() } else { config.playing_icon.as_str() };
+
+        self.audio_label.set_text(icon);
+        self.audio_event_box.show();
+
+        *self.audio_sink_inputs.borrow_mut() = sink_inputs.iter().map(|s| (s.index, s.muted)).collect();
+    }
+
+    fn setup_audio_click_handler(&self) {
+        let config = self.state.settings().audio_indicator();
+        if !config.enabled || !config.clickable {
+            return;
+        }
+
+        let sink_inputs_ref = self.audio_sink_inputs.clone();
+        self.audio_event_box.connect_button_press_event(move |_, event| {
+            if event.button() == 1 {
+                let inputs = sink_inputs_ref.borrow().clone();
+                if !inputs.is_empty() {
+                    crate::audio::toggle_mute(&inputs);
+                }
+                gtk::glib::Propagation::Stop
+            } else {
+                gtk::glib::Propagation::Proceed
+            }
+        });
+
+        self.audio_event_box.set_tooltip_text(Some("Toggle mute"));
     }
 
 	fn setup_click_handlers(&self, window_id: u64) {
@@ -686,6 +749,9 @@ impl WindowButton {
 		    gtk_button: self.gtk_button.clone(),
 		    layout_box: self.layout_box.clone(),
 		    title_label: self.title_label.clone(),
+		    audio_event_box: self.audio_event_box.clone(),
+		    audio_label: self.audio_label.clone(),
+		    audio_sink_inputs: self.audio_sink_inputs.clone(),
 		    display_titles: self.display_titles,
 		    state: self.state.clone(),
 		    window_id: self.window_id,
@@ -874,6 +940,7 @@ impl WindowButton {
         let last_allocation = RefCell::new(None);
         let container = self.layout_box.clone();
         let label = self.title_label.clone();
+        let audio_event_box = self.audio_event_box.clone();
         let show_titles = self.display_titles;
         let icon_dimension = self.state.settings().icon_size();
 
@@ -913,6 +980,7 @@ impl WindowButton {
 
                 let container_copy = container.clone();
                 let label_copy = label.clone();
+                let audio_copy = audio_event_box.clone();
                 let button_copy = button.clone();
                 gtk::glib::source::idle_add_local_once(move || {
                     for child in container_copy.children() {
@@ -920,6 +988,7 @@ impl WindowButton {
                     }
 
                     container_copy.pack_start(&icon_image, false, false, 0);
+                    container_copy.pack_start(&audio_copy, false, false, 0);
 
                     if show_titles {
                         container_copy.pack_start(&label_copy, true, true, 0);

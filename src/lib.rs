@@ -12,6 +12,7 @@ use waybar_cffi::{
     waybar_module,
 };
 
+mod audio;
 mod compositor;
 mod errors;
 mod global;
@@ -22,6 +23,7 @@ mod settings;
 mod system;
 mod widget;
 
+use audio::AudioState;
 use compositor::{WindowInfo, WindowSnapshot};
 use errors::ModuleError;
 use global::{EventMessage, SharedState};
@@ -255,6 +257,8 @@ struct ModuleInstance {
     previous_focused: Option<u64>,
     state: SharedState,
     selection: SelectionState,
+    audio_state: AudioState,
+    window_pids: HashMap<u64, u32>,
 }
 
 impl ModuleInstance {
@@ -270,6 +274,8 @@ impl ModuleInstance {
             previous_focused: None,
             state,
             selection: create_selection_state(),
+            audio_state: AudioState::new(),
+            window_pids: HashMap::new(),
         }
     }
 
@@ -281,6 +287,7 @@ impl ModuleInstance {
         while let Some(event) = event_stream.next().await {
             match event {
                 EventMessage::Notification(notif) => self.handle_notification(notif).await,
+                EventMessage::AudioUpdate(state) => self.handle_audio_update(state),
                 EventMessage::WindowUpdate(snapshot) => {
                     self.handle_window_update(snapshot, display_filter.clone()).await
                 }
@@ -534,6 +541,10 @@ impl ModuleInstance {
                 max_width
             }.max(1);
 
+            if let Some(pid) = window.pid {
+                self.window_pids.insert(window.id, pid as u32);
+            }
+
             let button = self.buttons.entry(window.id).or_insert_with(|| {
                 new_button_added = true;
                 let btn = WindowButton::create(&self.state, window, self.selection.clone());
@@ -576,6 +587,7 @@ impl ModuleInstance {
                 self.container.remove(button.get_widget());
             }
             self.selection.borrow_mut().remove(&window_id);
+            self.window_pids.remove(&window_id);
         }
 
         if !self.buttons.is_empty() {
@@ -621,6 +633,41 @@ impl ModuleInstance {
         }
 
         self.previous_snapshot = Some(snapshot);
+        self.update_button_audio_states();
+    }
+
+    fn handle_audio_update(&mut self, state: AudioState) {
+        self.audio_state = state;
+        self.update_button_audio_states();
+    }
+
+    fn update_button_audio_states(&self) {
+        let mut pid_window_count: HashMap<u32, usize> = HashMap::new();
+        for &pid in self.window_pids.values() {
+            *pid_window_count.entry(pid).or_insert(0) += 1;
+        }
+
+        for (window_id, button) in &self.buttons {
+            let Some(&pid) = self.window_pids.get(window_id) else {
+                button.update_audio_state(&[]);
+                continue;
+            };
+            let Some(inputs) = self.audio_state.get(&pid) else {
+                button.update_audio_state(&[]);
+                continue;
+            };
+            if pid_window_count.get(&pid).copied().unwrap_or(1) > 1 {
+                let focused_has_pid = self.previous_focused
+                    .and_then(|fid| self.window_pids.get(&fid))
+                    .map(|&fpid| fpid == pid)
+                    .unwrap_or(false);
+                if focused_has_pid && Some(*window_id) != self.previous_focused {
+                    button.update_audio_state(&[]);
+                    continue;
+                }
+            }
+            button.update_audio_state(inputs);
+        }
     }
 }
 

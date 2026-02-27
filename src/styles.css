@@ -37,3 +37,12 @@ scrolledwindow overshoot,
 scrolledwindow undershoot {
   background: none;
 }
+
+.audio-indicator {
+  padding: 0 3px;
+  opacity: 0.75;
+}
+
+.audio-indicator:hover {
+  opacity: 1.0;
+}

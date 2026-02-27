@@ -16,6 +16,7 @@ A Waybar module for displaying and managing traditional window buttons in the Ni
 - Drag and drop window reordering with hover-to-focus for external drags
 - Dynamic button sizing with taskbar width limits and scroll overflow
 - Multi-monitor support
+- Audio indicator with click-to-mute for windows playing audio
 - Notification integration with urgency hints
 - Custom CSS classes via pattern matching
 - Shows active window in Niri overview
@@ -414,6 +415,42 @@ Enable urgency hints when applications request attention:
 | `use_fuzzy_matching` | Case-insensitive/partial app ID matching | `false` |
 | `map_app_ids` | Translate notification app IDs to window app IDs | `{}` |
 
+### Audio Indicator
+
+Shows a speaker icon on window buttons when the application is playing audio. Requires `libpulse` (provided by PulseAudio or PipeWire's PulseAudio compatibility layer).
+
+Disabled by default. Enable with:
+
+```jsonc
+"audio_indicator": {
+  "enabled": true
+}
+```
+
+Full options:
+
+```jsonc
+"audio_indicator": {
+  "enabled": true,
+  "playing_icon": "󰕾",
+  "muted_icon": "󰖁",
+  "clickable": true
+}
+```
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `enabled` | Enable the audio indicator | `false` |
+| `playing_icon` | Icon shown when audio is playing | `󰕾` |
+| `muted_icon` | Icon shown when audio is muted | `󰖁` |
+| `clickable` | Click the icon to toggle mute | `true` |
+
+The icons use [Nerd Fonts](https://www.nerdfonts.com/) codepoints. Make sure your Waybar font includes them, or set custom icons using any Unicode characters you prefer.
+
+The indicator appears to the right of the application icon. For multi-process applications (Firefox, Chromium), when multiple windows share a process, the indicator is shown only on the focused window. Clicking the indicator toggles mute for all audio streams belonging to that process.
+
+The indicator can be styled via CSS using the `.audio-indicator` class (see [Styling](#styling)).
+
 ## Styling
 
 Customize appearance using Waybar's GTK CSS. The module container uses class `.niri_window_buttons` and contains `button` elements.
@@ -427,6 +464,7 @@ Customize appearance using Waybar's GTK CSS. The module container uses class `.n
 | `.urgent` | Window with pending notification |
 | `.dragging` | Window being dragged |
 | `.drag-over` | Valid drop target during drag |
+| `.audio-indicator` | Audio indicator icon inside each button |
 | Custom | Classes from `apps` configuration |
 
 **Example:**

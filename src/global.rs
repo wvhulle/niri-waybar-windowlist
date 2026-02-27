@@ -3,6 +3,7 @@ use async_channel::Sender;
 use futures::{Stream, StreamExt};
 use waybar_cffi::gtk::glib;
 use crate::{
+    audio,
     compositor::{CompositorClient, WindowSnapshot, WorkspaceEventStream},
     icons::IconResolver,
     notifications::{self, NotificationData},
@@ -47,6 +48,10 @@ impl SharedState {
             glib::spawn_future_local(forward_notifications(tx.clone()));
         }
 
+        if self.settings().audio_indicator().enabled {
+            glib::spawn_future_local(forward_audio_updates(tx.clone()));
+        }
+
         glib::spawn_future_local(forward_window_updates(tx.clone(), self.compositor().create_window_stream()));
         glib::spawn_future_local(forward_workspace_changes(tx, self.compositor().create_workspace_stream()));
 
@@ -62,6 +67,16 @@ pub enum EventMessage {
     Notification(Box<NotificationData>),
     WindowUpdate(WindowSnapshot),
     Workspaces(()),
+    AudioUpdate(audio::AudioState),
+}
+
+async fn forward_audio_updates(tx: Sender<EventMessage>) {
+    let mut stream = Box::pin(audio::create_stream());
+    while let Some(state) = stream.next().await {
+        if let Err(e) = tx.send(EventMessage::AudioUpdate(state)).await {
+            tracing::error!(%e, "failed to forward audio update");
+        }
+    }
 }
 
 async fn forward_notifications(tx: Sender<EventMessage>) {
