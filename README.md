@@ -10,8 +10,7 @@ A Waybar CFFI module for managing windows in the [Niri](https://github.com/YaLTe
 - Configurable click actions per button state (focused/unfocused) and per app
 - Context menu, multi-select, drag-and-drop reordering
 - Notification urgency hints
-- Multi-monitor and per-output sizing
-- Scroll overflow with arrow navigation
+- Multi-monitor support
 
 ## Installation
 
@@ -46,28 +45,15 @@ All options have sensible defaults. Override only what you need.
 | `allow_title_linebreaks` | `false`  | Allow `\n` in titles            |
 | `show_tooltip`           | `true`   | Tooltip on hover                |
 | `tooltip_delay`          | `300`    | Tooltip delay (ms)              |
-| `button_alignment`       | `"left"` | `"left"`, `"center"`, `"right"` |
 | `drag_hover_focus`       | `true`   | Focus on external drag hover    |
 | `drag_hover_focus_delay` | `500`    | Drag hover delay (ms)           |
 
 ### Sizing
 
-| Option               | Default | Description                     |
-| -------------------- | ------- | ------------------------------- |
-| `min_button_width`   | `150`   | Minimum button width (px)       |
-| `max_button_width`   | none    | Maximum button width (px)       |
-| `icon_size`          | `24`    | Icon size (px)                  |
-| `icon_spacing`       | `6`     | Gap between icon and title (px) |
-| `scroll_arrow_left`  | `"◀"`   | Left overflow arrow             |
-| `scroll_arrow_right` | `"▶"`   | Right overflow arrow            |
-
-Per-output overrides via `dimensions_per_output`:
-
-```jsonc
-"dimensions_per_output": {
-  "eDP-1": { "min_button_width": 100, "max_taskbar_width": 800 }
-}
-```
+| Option         | Default | Description                     |
+| -------------- | ------- | ------------------------------- |
+| `icon_size`    | `24`    | Icon size (px)                  |
+| `icon_spacing` | `6`     | Gap between icon and title (px) |
 
 ### Click Actions
 
@@ -87,14 +73,12 @@ Per-output overrides via `dimensions_per_output`:
 
 Actions can also be shell commands: `{ "command": "notify-send '{app_id}'" }` with placeholders `{window_id}`, `{app_id}`, `{title}`.
 
-When `scroll_up`/`scroll_down` are `"none"`, the mouse wheel scrolls the taskbar instead.
-
 <details>
 <summary>All available actions</summary>
 
 | Action                                                | Description                               |
 | ----------------------------------------------------- | ----------------------------------------- |
-| `none`                                                | No-op (scroll: enables taskbar scrolling) |
+| `none`                                                | No-op                                     |
 | `menu`                                                | Show context menu                         |
 | `focus-window`                                        | Focus the window                          |
 | `close-window`                                        | Close the window                          |

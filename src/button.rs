@@ -113,15 +113,6 @@ impl WindowButton {
         event_box.set_margin_top(0);
         event_box.set_margin_bottom(0);
 
-        if let Some(max_width) = state.settings().max_button_width(None) {
-            event_box.set_size_request(max_width, -1);
-            if display_titles && truncate_titles {
-                let icon_dim = state.settings().icon_size();
-                let max_chars = (max_width - icon_dim - icon_gap - 16) / 8;
-                title_label.set_max_width_chars(max_chars);
-            }
-        }
-
         let app_id = window.app_id.clone();
         let process_info_enabled = state.settings().should_show_process_info(app_id.as_deref());
         let icon_location = app_id
@@ -591,19 +582,4 @@ impl WindowButton {
         });
     }
 
-    pub fn resize_for_width(&self, width: i32) {
-        if self.state.settings().max_button_width(None).is_none() {
-            return;
-        }
-        if self.display_titles && self.state.settings().truncate_titles() {
-            let icon_dim = self.state.settings().icon_size();
-            let icon_gap = self.state.settings().icon_spacing();
-            let max_chars = ((width - icon_dim - icon_gap - 16) / 8).max(0);
-            self.title_label.set_max_width_chars(max_chars);
-
-            if max_chars == 0 {
-                self.title_label.hide();
-            }
-        }
-    }
 }

@@ -2,7 +2,7 @@ use std::{cell::Cell, rc::Rc};
 
 use waybar_cffi::gtk::{
     self as gtk,
-    prelude::{LabelExt, WidgetExt, WidgetExtManual},
+    prelude::{LabelExt, WidgetExt},
 };
 
 use crate::{audio::SinkInput, button::WindowButton, theme::IndicatorColor};

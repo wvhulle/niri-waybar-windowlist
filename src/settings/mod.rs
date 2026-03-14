@@ -9,16 +9,6 @@ use regex::Regex;
 use serde::{Deserialize, Deserializer};
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct OutputDimensions {
-    #[serde(default)]
-    pub min_button_width: Option<i32>,
-    #[serde(default)]
-    pub max_button_width: Option<i32>,
-    #[serde(default)]
-    pub max_taskbar_width: Option<i32>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct Settings {
     apps: HashMap<String, Vec<AppRule>>,
@@ -26,15 +16,8 @@ pub struct Settings {
     show_all_outputs: bool,
     only_current_workspace: bool,
     show_window_titles: bool,
-    min_button_width: i32,
-    max_button_width: Option<i32>,
     icon_size: i32,
     icon_spacing: i32,
-    max_taskbar_width: i32,
-    max_taskbar_width_per_output: HashMap<String, i32>,
-    dimensions_per_output: HashMap<String, OutputDimensions>,
-    scroll_arrow_left: String,
-    scroll_arrow_right: String,
     click_actions: ClickActions,
     ignore_rules: Vec<IgnoreRule>,
     context_menu: Vec<ContextMenuItem>,
@@ -46,8 +29,6 @@ pub struct Settings {
     allow_title_linebreaks: bool,
     show_tooltip: bool,
     tooltip_delay: u32,
-    button_alignment: ButtonAlignment,
-    left_click_focus_on_press: bool,
     audio_indicator: AudioIndicatorConfig,
     process_info: ProcessInfoConfig,
 }
@@ -60,15 +41,8 @@ impl Default for Settings {
             show_all_outputs: false,
             only_current_workspace: true,
             show_window_titles: true,
-            min_button_width: 150,
-            max_button_width: None,
             icon_size: 24,
             icon_spacing: 6,
-            max_taskbar_width: 1200,
-            max_taskbar_width_per_output: HashMap::new(),
-            dimensions_per_output: HashMap::new(),
-            scroll_arrow_left: "◀".to_string(),
-            scroll_arrow_right: "▶".to_string(),
             click_actions: ClickActions::default(),
             ignore_rules: Vec::new(),
             context_menu: default_context_menu(),
@@ -80,8 +54,6 @@ impl Default for Settings {
             allow_title_linebreaks: false,
             show_tooltip: true,
             tooltip_delay: 300,
-            button_alignment: ButtonAlignment::default(),
-            left_click_focus_on_press: false,
             audio_indicator: AudioIndicatorConfig::default(),
             process_info: ProcessInfoConfig::default(),
         }
@@ -118,15 +90,6 @@ impl Default for AudioIndicatorConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum ButtonAlignment {
-    #[default]
-    Left,
-    Center,
-    Right,
-}
-
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct NotificationConfig {
@@ -151,8 +114,6 @@ impl Default for NotificationConfig {
 pub struct AppRule {
     #[serde(rename = "match", deserialize_with = "parse_regex")]
     pattern: Regex,
-    #[serde(default)]
-    class: Option<String>,
     #[serde(default)]
     click_actions: Option<ClickActions>,
 }
@@ -270,45 +231,12 @@ impl Settings {
         self.show_window_titles
     }
 
-    pub fn min_button_width(&self, output: Option<&str>) -> i32 {
-        output
-            .and_then(|name| self.dimensions_per_output.get(name))
-            .and_then(|dims| dims.min_button_width)
-            .unwrap_or(self.min_button_width)
-    }
-
-    pub fn max_button_width(&self, output: Option<&str>) -> Option<i32> {
-        output
-            .and_then(|name| self.dimensions_per_output.get(name))
-            .and_then(|dims| dims.max_button_width)
-            .or(self.max_button_width)
-    }
-
     pub fn icon_size(&self) -> i32 {
         self.icon_size
     }
 
     pub fn icon_spacing(&self) -> i32 {
         self.icon_spacing
-    }
-
-    pub fn max_taskbar_width_for_output(&self, output: Option<&str>) -> i32 {
-        output
-            .and_then(|name| {
-                self.dimensions_per_output
-                    .get(name)
-                    .and_then(|dims| dims.max_taskbar_width)
-                    .or_else(|| self.max_taskbar_width_per_output.get(name).copied())
-            })
-            .unwrap_or(self.max_taskbar_width)
-    }
-
-    pub fn scroll_arrow_left(&self) -> &str {
-        &self.scroll_arrow_left
-    }
-
-    pub fn scroll_arrow_right(&self) -> &str {
-        &self.scroll_arrow_right
     }
 
     pub fn context_menu(&self) -> &[ContextMenuItem] {
@@ -345,14 +273,6 @@ impl Settings {
 
     pub fn tooltip_delay(&self) -> u32 {
         self.tooltip_delay
-    }
-
-    pub fn button_alignment(&self) -> ButtonAlignment {
-        self.button_alignment
-    }
-
-    pub fn left_click_focus_on_press(&self) -> bool {
-        self.left_click_focus_on_press
     }
 
     pub fn audio_indicator(&self) -> &AudioIndicatorConfig {

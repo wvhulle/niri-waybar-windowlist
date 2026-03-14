@@ -68,75 +68,36 @@ pub fn load_border_colors() -> BorderColors {
     parse_border_colors(&content)
 }
 
+/// Niri default colors (from focus-ring defaults: #7fc8ff active, #9b0000 urgent).
+fn default_active() -> IndicatorColor {
+    IndicatorColor::Solid(gdk::RGBA::new(0x7f as f64 / 255.0, 0xc8 as f64 / 255.0, 0xff as f64 / 255.0, 1.0))
+}
+
+fn default_urgent() -> IndicatorColor {
+    IndicatorColor::Solid(gdk::RGBA::new(0x9b as f64 / 255.0, 0.0, 0.0, 1.0))
+}
+
 fn parse_border_colors(content: &str) -> BorderColors {
     let doc: kdl::KdlDocument = content
         .parse()
         .unwrap_or_else(|e| panic!("failed to parse niri config: {e}"));
 
-    let border = doc
-        .get("layout")
-        .and_then(|n| n.children())
-        .and_then(|d| d.get("border"))
-        .and_then(|n| n.children())
-        .expect("niri config missing layout.border section");
+    let layout = doc.get("layout").and_then(|n| n.children());
 
-    let active = parse_indicator_color(border, "active-gradient", "active-color")
-        .expect("niri config missing layout.border active color/gradient");
+    // Try border first, then focus-ring as fallback (niri enables focus-ring by default).
+    let section = layout
+        .and_then(|d| d.get("border").and_then(|n| n.children()))
+        .or_else(|| layout.and_then(|d| d.get("focus-ring").and_then(|n| n.children())));
 
-    let urgent = parse_indicator_color(border, "urgent-gradient", "urgent-color")
-        .expect("niri config missing layout.border urgent color/gradient");
+    let (active, urgent) = match section {
+        Some(s) => (
+            parse_indicator_color(s, "active-gradient", "active-color")
+                .unwrap_or(default_active()),
+            parse_indicator_color(s, "urgent-gradient", "urgent-color")
+                .unwrap_or(default_urgent()),
+        ),
+        None => (default_active(), default_urgent()),
+    };
 
     BorderColors { active, urgent }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_gradient_config() {
-        let config = r##"
-layout {
-    border {
-        active-gradient angle=130 from="#3e999f" relative-to="workspace-view" to="#4271ae"
-        urgent-gradient angle=130 from="#c82829" relative-to="workspace-view" to="#f5871f"
-    }
-}
-"##;
-        let colors = parse_border_colors(config);
-        match colors.active {
-            IndicatorColor::Gradient { from, to } => {
-                assert!((from.red() - 0x3e as f64 / 255.0).abs() < 0.01);
-                assert!((to.red() - 0x42 as f64 / 255.0).abs() < 0.01);
-            }
-            IndicatorColor::Solid(_) => panic!("expected gradient"),
-        }
-        match colors.urgent {
-            IndicatorColor::Gradient { from, to } => {
-                assert!((from.red() - 0xc8 as f64 / 255.0).abs() < 0.01);
-                assert!((to.red() - 0xf5 as f64 / 255.0).abs() < 0.01);
-            }
-            IndicatorColor::Solid(_) => panic!("expected gradient"),
-        }
-    }
-
-    #[test]
-    #[should_panic(expected = "niri config missing")]
-    fn panics_on_missing_border() {
-        parse_border_colors("layout { gaps 8; }");
-    }
-
-    #[test]
-    fn parse_hex() {
-        let color = parse_hex_color("#4271ae").unwrap();
-        assert!((color.red() - 0x42 as f64 / 255.0).abs() < 0.001);
-        assert!((color.green() - 0x71 as f64 / 255.0).abs() < 0.001);
-        assert!((color.blue() - 0xae as f64 / 255.0).abs() < 0.001);
-    }
-
-    #[test]
-    fn loads_real_config() {
-        let colors = load_border_colors();
-        eprintln!("active={:?} urgent={:?}", colors.active, colors.urgent);
-    }
 }

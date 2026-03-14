@@ -13,7 +13,7 @@ use waybar_cffi::gtk::{
 use crate::{
     button::WindowButton,
     settings::MultiSelectAction,
-    taskbar::{clear_selection, scroll_taskbar, set_background_color, FocusedWindow},
+    taskbar::{clear_selection, set_background_color, FocusedWindow},
     SharedState,
 };
 
@@ -224,9 +224,9 @@ impl WindowButton {
                 .settings()
                 .get_click_actions(app_id_ref, title_str);
 
-            let (action, scroll_delta) = match event.direction() {
-                ScrollDirection::Up => (&actions.scroll_up, -1.0),
-                ScrollDirection::Down => (&actions.scroll_down, 1.0),
+            let action = match event.direction() {
+                ScrollDirection::Up => &actions.scroll_up,
+                ScrollDirection::Down => &actions.scroll_down,
                 ScrollDirection::Smooth => {
                     let (delta_x, delta_y) = event.delta();
                     let delta = if delta_x.abs() > delta_y.abs() {
@@ -235,9 +235,9 @@ impl WindowButton {
                         delta_y
                     };
                     if delta < -0.01 {
-                        (&actions.scroll_up, delta)
+                        &actions.scroll_up
                     } else if delta > 0.01 {
-                        (&actions.scroll_down, delta)
+                        &actions.scroll_down
                     } else {
                         return gtk::glib::Propagation::Stop;
                     }
@@ -247,8 +247,6 @@ impl WindowButton {
 
             if !action.is_none() {
                 Self::execute_click_action(&state_scroll, window_id, action, app_id_ref, title_str);
-            } else {
-                scroll_taskbar(scroll_delta);
             }
             gtk::glib::Propagation::Stop
         });

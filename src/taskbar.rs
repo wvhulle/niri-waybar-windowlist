@@ -3,7 +3,6 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc};
 use waybar_cffi::gtk::{
     self as gtk, gdk,
     glib::translate::{IntoGlib, ToGlibPtr},
-    prelude::AdjustmentExt,
     StateFlags,
 };
 
@@ -41,23 +40,3 @@ pub fn create_focused_window() -> FocusedWindow {
     Rc::new(std::cell::Cell::new(None))
 }
 
-thread_local! {
-    static TASKBAR_ADJUSTMENT: RefCell<Option<gtk::Adjustment>> = const { RefCell::new(None) };
-}
-
-pub fn set_taskbar_adjustment(adj: gtk::Adjustment) {
-    TASKBAR_ADJUSTMENT.with(|cell| {
-        *cell.borrow_mut() = Some(adj);
-    });
-}
-
-pub fn scroll_taskbar(delta: f64) {
-    TASKBAR_ADJUSTMENT.with(|cell| {
-        if let Some(ref adj) = *cell.borrow() {
-            let step = adj.page_size() / 4.0;
-            let max = adj.upper() - adj.page_size();
-            let new_value = (adj.value() + delta * step).clamp(0.0, max);
-            adj.set_value(new_value);
-        }
-    });
-}
