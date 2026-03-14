@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use itertools::Itertools;
 use regex::Regex;
 use serde::{Deserialize, Deserializer};
 
@@ -21,14 +20,14 @@ pub struct Settings {
     notifications: NotificationConfig,
     #[serde(default)]
     show_all_outputs: bool,
-    #[serde(default)]
+    #[serde(default = "default_true")]
     only_current_workspace: bool,
     #[serde(default = "default_true")]
     show_window_titles: bool,
     #[serde(default = "default_min_width")]
     min_button_width: i32,
-    #[serde(default = "default_max_width")]
-    max_button_width: i32,
+    #[serde(default)]
+    max_button_width: Option<i32>,
     #[serde(default = "default_icon_size")]
     icon_size: i32,
     #[serde(default = "default_spacing")]
@@ -312,7 +311,6 @@ where
 
 fn default_true() -> bool { true }
 fn default_min_width() -> i32 { 150 }
-fn default_max_width() -> i32 { 235 }
 fn default_icon_size() -> i32 { 24 }
 fn default_spacing() -> i32 { 6 }
 fn default_max_taskbar() -> i32 { 1200 }
@@ -378,34 +376,6 @@ fn default_multi_select_menu() -> Vec<MultiSelectMenuItem> {
 }
 
 impl Settings {
-    pub fn get_app_classes(&self, app_id: &str) -> Vec<&str> {
-        self.apps
-            .get(app_id)
-            .map(|rules| {
-                rules
-                    .iter()
-                    .filter_map(|r| r.class.as_deref())
-                    .collect_vec()
-            })
-            .unwrap_or_default()
-    }
-
-    pub fn match_app_rules<'a>(
-        &'a self,
-        app_id: &str,
-        title: &'a str,
-    ) -> Box<dyn Iterator<Item = &'a str> + 'a> {
-        match self.apps.get(app_id) {
-            Some(rules) => Box::new(
-                rules
-                    .iter()
-                    .filter(move |rule| rule.pattern.is_match(title))
-                    .filter_map(|rule| rule.class.as_deref())
-            ),
-            None => Box::new(std::iter::empty()),
-        }
-    }
-
     pub fn get_click_actions(&self, app_id: Option<&str>, title: Option<&str>) -> ClickActions {
         if let (Some(id), Some(t)) = (app_id, title) {
             if let Some(rules) = self.apps.get(id) {
@@ -475,11 +445,11 @@ impl Settings {
             .unwrap_or(self.min_button_width)
     }
 
-    pub fn max_button_width(&self, output: Option<&str>) -> i32 {
+    pub fn max_button_width(&self, output: Option<&str>) -> Option<i32> {
         output
             .and_then(|name| self.dimensions_per_output.get(name))
             .and_then(|dims| dims.max_button_width)
-            .unwrap_or(self.max_button_width)
+            .or(self.max_button_width)
     }
 
     pub fn icon_size(&self) -> i32 {

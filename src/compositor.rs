@@ -708,6 +708,18 @@ impl WindowTracker {
 				.then_with(|| a.window.id.cmp(&b.window.id))
 		});
 
+		for pair in &window_workspace_pairs {
+		    let pos = pair.window.layout.pos_in_scrolling_layout
+		        .or_else(|| position_map.get(&pair.window.id).copied());
+		    tracing::debug!(
+		        window_id = pair.window.id,
+		        app_id = ?pair.window.app_id,
+		        workspace_idx = pair.workspace.idx,
+		        pos = ?pos,
+		        "snapshot order"
+		    );
+		}
+
         let active_workspace = workspaces.values().find(|ws| ws.is_active).map(|ws| ws.id);
         let overview_active = active_workspace.and_then(|ws_id| active_per_workspace.get(&ws_id).copied());
         let has_focused = window_workspace_pairs.iter().any(|pair| pair.window.is_focused);

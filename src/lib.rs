@@ -8,7 +8,7 @@ use settings::Settings;
 use tracing_subscriber::{EnvFilter, fmt::format::FmtSpan};
 use waybar_cffi::{
     Module,
-    gtk::{self, Orientation, gio, glib::MainContext, traits::{BoxExt, ContainerExt, CssProviderExt, StyleContextExt, WidgetExt}},
+    gtk::{self, Orientation, gio, glib::MainContext, traits::{BoxExt, ContainerExt, WidgetExt}},
     sys::wbcffi_module,
     waybar_module,
 };
@@ -119,21 +119,9 @@ waybar_module!(WindowButtonsModule);
 async fn initialize_module(info: &waybar_cffi::InitInfo, state: SharedState, updater: WaybarUpdater) -> Result<(), ModuleError> {
     let root = info.get_root_widget();
 
-    // Remove rounded corners on button hover (GTK default theme adds border-radius)
-    let css_provider = gtk::CssProvider::new();
-    css_provider.load_from_data(b"
-        .niri-window-buttons button {
-            border-radius: 0;
-        }
-    ").expect("failed to load CSS");
-    gtk::StyleContext::add_provider_for_screen(
-        &gtk::gdk::Screen::default().expect("no default screen"),
-        &css_provider,
-        gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
-    );
-
     let container = gtk::Box::new(Orientation::Horizontal, 0);
-    container.style_context().add_class("niri-window-buttons");
+    container.set_vexpand(true);
+    container.set_hexpand(true);
 
     root.add(&container);
 
@@ -440,11 +428,12 @@ impl ModuleInstance {
 
             let button = self.buttons.entry(window.id).or_insert_with(|| {
                 let btn = WindowButton::create(&self.state, window, self.selection.clone(), self.focused_window.clone());
-                self.container.pack_start(btn.get_widget(), false, false, 0);
+                self.container.pack_start(btn.get_widget(), true, true, 0);
                 btn
             });
 
             button.update_focus(window.is_focused);
+            button.update_urgent(window.is_urgent);
             button.update_title(window.title.as_deref());
 
             removed_windows.remove(&window.id);
