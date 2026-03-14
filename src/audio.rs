@@ -36,14 +36,14 @@ pub fn create_stream() -> impl Stream<Item = AudioState> {
     }
 }
 
-pub fn toggle_mute(sink_inputs: &[(u32, bool)]) {
-    let all_muted = sink_inputs.iter().all(|(_, muted)| *muted);
+pub fn toggle_mute(sink_inputs: &[SinkInput]) {
+    let all_muted = sink_inputs.iter().all(|s| s.muted);
     let target_mute = !all_muted;
     PA_CONTEXT.with(|ctx| {
         if let Some(ctx) = ctx.borrow().as_ref() {
             let mut introspector = ctx.introspect();
-            for &(index, _) in sink_inputs {
-                let _ = introspector.set_sink_input_mute(index, target_mute, None);
+            for s in sink_inputs {
+                let _ = introspector.set_sink_input_mute(s.index, target_mute, None);
             }
         }
     });
@@ -121,7 +121,7 @@ fn query_sink_inputs(tx: Sender<AudioState>) {
         let ctx_ref = ctx.borrow();
         if let Some(ctx) = ctx_ref.as_ref() {
             let introspector = ctx.introspect();
-            let accumulator: Rc<RefCell<Vec<(u32, u32, bool)>>> = Rc::new(RefCell::new(Vec::new()));
+            let accumulator: Rc<RefCell<Vec<(u32, SinkInput)>>> = Rc::new(RefCell::new(Vec::new()));
             let _ = introspector.get_sink_input_info_list(move |result| match result {
                 ListResult::Item(info) => {
                     if info.corked {
@@ -130,15 +130,14 @@ fn query_sink_inputs(tx: Sender<AudioState>) {
                     if let Some(pid_str) = info.proplist.get_str(properties::APPLICATION_PROCESS_ID)
                     {
                         if let Ok(pid) = pid_str.trim().parse::<u32>() {
-                            accumulator.borrow_mut().push((info.index, pid, info.mute));
+                            accumulator.borrow_mut().push((pid, SinkInput { index: info.index, muted: info.mute }));
                         }
                     }
                 }
                 ListResult::End => {
                     let items = mem::take(&mut *accumulator.borrow_mut());
                     let mut state: AudioState = HashMap::new();
-                    for (index, pid, muted) in items {
-                        let sink_input = SinkInput { index, muted };
+                    for (pid, sink_input) in items {
                         let mut current = pid;
                         loop {
                             state.entry(current).or_default().push(sink_input.clone());

@@ -29,7 +29,7 @@ pub struct WindowButton {
     pub(crate) title_label: gtk::Label,
     pub(crate) audio_event_box: EventBox,
     pub(crate) audio_label: gtk::Label,
-    pub(crate) audio_sink_inputs: Rc<RefCell<Vec<(u32, bool)>>>,
+    pub(crate) audio_sink_inputs: Rc<RefCell<Vec<crate::audio::SinkInput>>>,
     pub(crate) display_titles: bool,
     pub(crate) state: SharedState,
     pub(crate) window_id: u64,
@@ -143,7 +143,7 @@ impl WindowButton {
         audio_event_box.add(&audio_label);
         audio_event_box.set_no_show_all(true);
 
-        let audio_sink_inputs = Rc::new(RefCell::new(Vec::<(u32, bool)>::new()));
+        let audio_sink_inputs = Rc::new(RefCell::new(Vec::<crate::audio::SinkInput>::new()));
 
         let button = Self {
             app_id,

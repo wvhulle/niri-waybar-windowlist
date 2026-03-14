@@ -4,6 +4,7 @@ use async_channel::Sender;
 use futures::{Stream, TryStreamExt};
 use itertools::Itertools;
 use serde::{Deserialize, Deserializer};
+use thiserror::Error;
 use waybar_cffi::gtk::glib;
 use zbus::{
     fdo::MonitoringProxy,
@@ -11,6 +12,21 @@ use zbus::{
     zvariant::{DeserializeDict, Optional, Type},
     Connection, MatchRule, Message, MessageStream,
 };
+
+#[derive(Error, Debug)]
+enum NotificationError {
+    #[error(transparent)]
+    Zbus(#[from] zbus::Error),
+
+    #[error(transparent)]
+    ZbusFdo(#[from] zbus::fdo::Error),
+
+    #[error(transparent)]
+    ZbusNames(#[from] zbus::names::Error),
+
+    #[error("notification channel closed")]
+    ChannelClosed,
+}
 
 mod pid_cache;
 
@@ -123,7 +139,7 @@ static NOTIFICATION_INTERFACE: &str = "org.freedesktop.Notifications";
 static NOTIFY_METHOD: &str = "Notify";
 
 #[tracing::instrument(level = "TRACE", skip_all, err)]
-async fn run_monitor(tx: Sender<NotificationData>) -> anyhow::Result<()> {
+async fn run_monitor(tx: Sender<NotificationData>) -> Result<(), NotificationError> {
     let pid_resolver = pid_cache::PidCache::create(Duration::from_secs(86400));
 
     let connection = Connection::session().await?;
@@ -153,7 +169,7 @@ async fn handle_message(
     tx: &Sender<NotificationData>,
     pid_resolver: &pid_cache::PidCache,
     msg: &Message,
-) -> anyhow::Result<()> {
+) -> Result<(), NotificationError> {
     if msg.header().interface() == Some(&InterfaceName::from_static_str(NOTIFICATION_INTERFACE)?)
         && msg.header().member() == Some(&MemberName::from_static_str(NOTIFY_METHOD)?)
     {
@@ -167,7 +183,8 @@ async fn handle_message(
             notification: msg.body().deserialize()?,
             process_id,
         })
-        .await?;
+        .await
+        .map_err(|_| NotificationError::ChannelClosed)?;
     }
 
     Ok(())

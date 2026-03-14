@@ -6,6 +6,7 @@ use std::{
 
 use async_channel::{Receiver, Sender};
 use futures::{channel::oneshot, FutureExt, StreamExt, TryStreamExt};
+use thiserror::Error;
 use waybar_cffi::gtk::glib;
 use zbus::{
     fdo::{DBusProxy, MonitoringProxy, NameOwnerChanged},
@@ -13,6 +14,15 @@ use zbus::{
     names::UniqueName,
     Connection, MatchRule, MessageStream,
 };
+
+#[derive(Error, Debug)]
+enum PidCacheError {
+    #[error(transparent)]
+    Zbus(#[from] zbus::Error),
+
+    #[error(transparent)]
+    ZbusFdo(#[from] zbus::fdo::Error),
+}
 
 #[derive(Debug, Clone)]
 pub struct PidCache {
@@ -66,7 +76,7 @@ struct CacheEntry {
 
 static DBUS_SYSTEM_INTERFACE: &str = "org.freedesktop.DBus";
 
-async fn cache_worker(rx: Receiver<CacheRequest>, ttl: Duration) -> anyhow::Result<()> {
+async fn cache_worker(rx: Receiver<CacheRequest>, ttl: Duration) -> Result<(), PidCacheError> {
     let mut storage = CacheStorage::new(ttl);
 
     let dbus_connection = Connection::session().await?;
@@ -101,7 +111,7 @@ async fn cache_worker(rx: Receiver<CacheRequest>, ttl: Duration) -> anyhow::Resu
                     }
                     Err(e) => {
                         tracing::error!(%e, "D-Bus event stream error");
-                        anyhow::bail!(e);
+                        return Err(e.into());
                     }
                 }
             }

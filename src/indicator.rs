@@ -28,8 +28,7 @@ impl WindowButton {
         self.audio_label.set_text(icon);
         self.audio_event_box.show();
 
-        *self.audio_sink_inputs.borrow_mut() =
-            sink_inputs.iter().map(|s| (s.index, s.muted)).collect();
+        *self.audio_sink_inputs.borrow_mut() = sink_inputs.to_vec();
     }
 
     pub(crate) fn setup_audio_click_handler(&self) {

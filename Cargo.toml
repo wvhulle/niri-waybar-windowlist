@@ -12,7 +12,6 @@ crate-type = ["cdylib"]
 pedantic = "warn"
 
 [dependencies]
-anyhow = "1.0"
 async-channel = "2.5"
 dirs = "6"
 async-stream = "0.3"
