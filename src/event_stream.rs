@@ -1,6 +1,7 @@
 use async_channel::Sender;
 use futures::StreamExt;
 use waybar_cffi::gtk::glib;
+
 use crate::{
     audio,
     compositor::{CompositorEvent, NiriEventStream},
@@ -37,7 +38,10 @@ pub fn create_event_stream(state: &SharedState) -> impl futures::Stream<Item = E
         glib::spawn_future_local(forward_process_info_ticks(tx.clone(), interval));
     }
 
-    glib::spawn_future_local(forward_compositor_events(tx, state.compositor().create_event_stream()));
+    glib::spawn_future_local(forward_compositor_events(
+        tx,
+        state.compositor().create_event_stream(),
+    ));
 
     async_stream::stream! {
         while let Ok(event) = rx.recv().await {
@@ -58,7 +62,10 @@ async fn forward_audio_updates(tx: Sender<EventMessage>) {
 async fn forward_notifications(tx: Sender<EventMessage>) {
     let mut notification_stream = Box::pin(notifications::create_stream());
     while let Some(notification) = notification_stream.next().await {
-        if let Err(e) = tx.send(EventMessage::Notification(Box::new(notification))).await {
+        if let Err(e) = tx
+            .send(EventMessage::Notification(Box::new(notification)))
+            .await
+        {
             tracing::error!(%e, "failed to forward notification");
         }
     }
@@ -79,7 +86,9 @@ async fn forward_compositor_events(tx: Sender<EventMessage>, stream: NiriEventSt
         let msg = match event {
             CompositorEvent::FullSnapshot(snapshot) => EventMessage::FullSnapshot(snapshot),
             CompositorEvent::FocusChanged { old, new } => EventMessage::FocusChanged { old, new },
-            CompositorEvent::WindowTitleChanged { id, title } => EventMessage::WindowTitleChanged { id, title },
+            CompositorEvent::WindowTitleChanged { id, title } => {
+                EventMessage::WindowTitleChanged { id, title }
+            }
             CompositorEvent::Workspaces => EventMessage::Workspaces(()),
             CompositorEvent::ConfigReloaded => EventMessage::ConfigReloaded,
         };

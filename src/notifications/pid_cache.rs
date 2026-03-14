@@ -3,14 +3,15 @@ use std::{
     fmt::Debug,
     time::{Duration, SystemTime},
 };
+
 use async_channel::{Receiver, Sender};
-use futures::{FutureExt, StreamExt, TryStreamExt, channel::oneshot};
+use futures::{channel::oneshot, FutureExt, StreamExt, TryStreamExt};
 use waybar_cffi::gtk::glib;
 use zbus::{
-    Connection, MatchRule, MessageStream,
     fdo::{DBusProxy, MonitoringProxy, NameOwnerChanged},
     message::Type,
     names::UniqueName,
+    Connection, MatchRule, MessageStream,
 };
 
 #[derive(Debug, Clone)]
@@ -131,7 +132,10 @@ async fn process_dbus_event(
     if let Some(change_event) = NameOwnerChanged::from_message(message) {
         if let Ok(args) = change_event.args() {
             if let Some(new_connection) = args.new_owner().as_ref() {
-                if let Ok(pid) = dbus_api.get_connection_unix_process_id(new_connection.clone().into()).await {
+                if let Ok(pid) = dbus_api
+                    .get_connection_unix_process_id(new_connection.clone().into())
+                    .await
+                {
                     storage.store(new_connection, Some(pid));
                 }
             } else if let Some(old_connection) = args.old_owner.as_ref() {
@@ -147,11 +151,17 @@ async fn handle_cache_request(
     request: CacheRequest,
 ) {
     match request {
-        CacheRequest::Query { connection, response } => {
+        CacheRequest::Query {
+            connection,
+            response,
+        } => {
             if let Some(cached_pid) = storage.retrieve(&connection) {
                 let _ = response.send(cached_pid);
             } else if let Ok(unique_name) = UniqueName::try_from(connection.as_str()) {
-                if let Ok(pid) = dbus_api.get_connection_unix_process_id(unique_name.into()).await {
+                if let Ok(pid) = dbus_api
+                    .get_connection_unix_process_id(unique_name.into())
+                    .await
+                {
                     storage.store(connection, Some(pid));
                     let _ = response.send(Some(pid));
                 }
@@ -175,7 +185,8 @@ impl CacheStorage {
     }
 
     fn remove_expired(&mut self, current_time: SystemTime) {
-        self.entries.retain(|_, entry| entry.expires_at > current_time);
+        self.entries
+            .retain(|_, entry| entry.expires_at > current_time);
     }
 
     fn retrieve(&mut self, connection: &str) -> Option<Option<u32>> {

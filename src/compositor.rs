@@ -1,7 +1,9 @@
 use std::{collections::HashMap, ops::Deref};
+
 use async_channel::{Receiver, Sender};
-use niri_ipc::{Action, Event, Output, Reply, Request, Workspace, socket::Socket};
-use crate::{CompositorIpcError, settings::Settings};
+use niri_ipc::{socket::Socket, Action, Event, Output, Reply, Request, Workspace};
+
+use crate::{settings::Settings, CompositorIpcError};
 
 #[derive(Debug, Clone)]
 pub struct CompositorClient {
@@ -21,7 +23,9 @@ impl CompositorClient {
 
     #[tracing::instrument(level = "TRACE", err)]
     pub fn close_window(&self, window_id: u64) -> Result<(), CompositorIpcError> {
-        let response = send_request(Request::Action(Action::CloseWindow { id: Some(window_id) }))?;
+        let response = send_request(Request::Action(Action::CloseWindow {
+            id: Some(window_id),
+        }))?;
         validate_handled(response)
     }
 
@@ -32,35 +36,43 @@ impl CompositorClient {
         validate_handled(response)
     }
 
-	#[tracing::instrument(level = "TRACE", err)]
-	pub fn maximize_window_to_edges(&self, window_id: u64) -> Result<(), CompositorIpcError> {
-		self.focus_window(window_id)?;
-		let response = send_request(Request::Action(Action::MaximizeWindowToEdges { id: Some(window_id) }))?;
-		validate_handled(response)
-	}
+    #[tracing::instrument(level = "TRACE", err)]
+    pub fn maximize_window_to_edges(&self, window_id: u64) -> Result<(), CompositorIpcError> {
+        self.focus_window(window_id)?;
+        let response = send_request(Request::Action(Action::MaximizeWindowToEdges {
+            id: Some(window_id),
+        }))?;
+        validate_handled(response)
+    }
 
-	#[tracing::instrument(level = "TRACE", err)]
-	pub fn center_column(&self, window_id: u64) -> Result<(), CompositorIpcError> {
-		self.focus_window(window_id)?;
-		let response = send_request(Request::Action(Action::CenterColumn {}))?;
-		validate_handled(response)
-	}
+    #[tracing::instrument(level = "TRACE", err)]
+    pub fn center_column(&self, window_id: u64) -> Result<(), CompositorIpcError> {
+        self.focus_window(window_id)?;
+        let response = send_request(Request::Action(Action::CenterColumn {}))?;
+        validate_handled(response)
+    }
 
-	#[tracing::instrument(level = "TRACE", err)]
-	pub fn fullscreen_window(&self, window_id: u64) -> Result<(), CompositorIpcError> {
-		let response = send_request(Request::Action(Action::FullscreenWindow { id: Some(window_id) }))?;
-		validate_handled(response)
-	}
+    #[tracing::instrument(level = "TRACE", err)]
+    pub fn fullscreen_window(&self, window_id: u64) -> Result<(), CompositorIpcError> {
+        let response = send_request(Request::Action(Action::FullscreenWindow {
+            id: Some(window_id),
+        }))?;
+        validate_handled(response)
+    }
 
     #[tracing::instrument(level = "TRACE", err)]
     pub fn toggle_floating(&self, window_id: u64) -> Result<(), CompositorIpcError> {
-        let response = send_request(Request::Action(Action::ToggleWindowFloating { id: Some(window_id) }))?;
+        let response = send_request(Request::Action(Action::ToggleWindowFloating {
+            id: Some(window_id),
+        }))?;
         validate_handled(response)
     }
 
     #[tracing::instrument(level = "TRACE", err)]
     pub fn center_window(&self, window_id: u64) -> Result<(), CompositorIpcError> {
-        let response = send_request(Request::Action(Action::CenterWindow { id: Some(window_id) }))?;
+        let response = send_request(Request::Action(Action::CenterWindow {
+            id: Some(window_id),
+        }))?;
         validate_handled(response)
     }
 
@@ -72,7 +84,10 @@ impl CompositorClient {
     }
 
     #[tracing::instrument(level = "TRACE", err)]
-    pub fn expand_column_to_available_width(&self, window_id: u64) -> Result<(), CompositorIpcError> {
+    pub fn expand_column_to_available_width(
+        &self,
+        window_id: u64,
+    ) -> Result<(), CompositorIpcError> {
         self.focus_window(window_id)?;
         let response = send_request(Request::Action(Action::ExpandColumnToAvailableWidth {}))?;
         validate_handled(response)
@@ -80,7 +95,9 @@ impl CompositorClient {
 
     #[tracing::instrument(level = "TRACE", err)]
     pub fn toggle_windowed_fullscreen(&self, window_id: u64) -> Result<(), CompositorIpcError> {
-        let response = send_request(Request::Action(Action::ToggleWindowedFullscreen { id: Some(window_id) }))?;
+        let response = send_request(Request::Action(Action::ToggleWindowedFullscreen {
+            id: Some(window_id),
+        }))?;
         validate_handled(response)
     }
 
@@ -115,21 +132,27 @@ impl CompositorClient {
     #[tracing::instrument(level = "TRACE", err)]
     pub fn switch_preset_window_height(&self, window_id: u64) -> Result<(), CompositorIpcError> {
         self.focus_window(window_id)?;
-        let response = send_request(Request::Action(Action::SwitchPresetWindowHeight { id: None }))?;
+        let response = send_request(Request::Action(Action::SwitchPresetWindowHeight {
+            id: None,
+        }))?;
         validate_handled(response)
     }
 
     #[tracing::instrument(level = "TRACE", err)]
     pub fn move_window_to_workspace_down(&self, window_id: u64) -> Result<(), CompositorIpcError> {
         self.focus_window(window_id)?;
-        let response = send_request(Request::Action(Action::MoveWindowToWorkspaceDown { focus: false }))?;
+        let response = send_request(Request::Action(Action::MoveWindowToWorkspaceDown {
+            focus: false,
+        }))?;
         validate_handled(response)
     }
 
     #[tracing::instrument(level = "TRACE", err)]
     pub fn move_window_to_workspace_up(&self, window_id: u64) -> Result<(), CompositorIpcError> {
         self.focus_window(window_id)?;
-        let response = send_request(Request::Action(Action::MoveWindowToWorkspaceUp { focus: false }))?;
+        let response = send_request(Request::Action(Action::MoveWindowToWorkspaceUp {
+            focus: false,
+        }))?;
         validate_handled(response)
     }
 
@@ -218,28 +241,40 @@ impl CompositorClient {
     }
 
     #[tracing::instrument(level = "TRACE", err)]
-    pub fn move_window_down_or_to_workspace_down(&self, window_id: u64) -> Result<(), CompositorIpcError> {
+    pub fn move_window_down_or_to_workspace_down(
+        &self,
+        window_id: u64,
+    ) -> Result<(), CompositorIpcError> {
         self.focus_window(window_id)?;
         let response = send_request(Request::Action(Action::MoveWindowDownOrToWorkspaceDown {}))?;
         validate_handled(response)
     }
 
     #[tracing::instrument(level = "TRACE", err)]
-    pub fn move_window_up_or_to_workspace_up(&self, window_id: u64) -> Result<(), CompositorIpcError> {
+    pub fn move_window_up_or_to_workspace_up(
+        &self,
+        window_id: u64,
+    ) -> Result<(), CompositorIpcError> {
         self.focus_window(window_id)?;
         let response = send_request(Request::Action(Action::MoveWindowUpOrToWorkspaceUp {}))?;
         validate_handled(response)
     }
 
     #[tracing::instrument(level = "TRACE", err)]
-    pub fn move_column_left_or_to_monitor_left(&self, window_id: u64) -> Result<(), CompositorIpcError> {
+    pub fn move_column_left_or_to_monitor_left(
+        &self,
+        window_id: u64,
+    ) -> Result<(), CompositorIpcError> {
         self.focus_window(window_id)?;
         let response = send_request(Request::Action(Action::MoveColumnLeftOrToMonitorLeft {}))?;
         validate_handled(response)
     }
 
     #[tracing::instrument(level = "TRACE", err)]
-    pub fn move_column_right_or_to_monitor_right(&self, window_id: u64) -> Result<(), CompositorIpcError> {
+    pub fn move_column_right_or_to_monitor_right(
+        &self,
+        window_id: u64,
+    ) -> Result<(), CompositorIpcError> {
         self.focus_window(window_id)?;
         let response = send_request(Request::Action(Action::MoveColumnRightOrToMonitorRight {}))?;
         validate_handled(response)
@@ -259,12 +294,22 @@ impl CompositorClient {
     }
 
     #[tracing::instrument(level = "TRACE", err)]
-    pub fn reposition_window(&self, window_id: u64, position_delta: i32, keep_stacked: bool) -> Result<(), CompositorIpcError> {
+    pub fn reposition_window(
+        &self,
+        window_id: u64,
+        position_delta: i32,
+        keep_stacked: bool,
+    ) -> Result<(), CompositorIpcError> {
         if position_delta == 0 {
             return Ok(());
         }
 
-        tracing::info!("repositioning window {} by {} columns (keep_stacked: {})", window_id, position_delta, keep_stacked);
+        tracing::info!(
+            "repositioning window {} by {} columns (keep_stacked: {})",
+            window_id,
+            position_delta,
+            keep_stacked
+        );
 
         let response = send_request(Request::Windows)?;
         let all_windows: Vec<niri_ipc::Window> = match response {
@@ -281,10 +326,7 @@ impl CompositorClient {
             return Ok(());
         };
 
-        let (current_col, tile_position) = target
-            .layout
-            .pos_in_scrolling_layout
-            .unwrap_or((1, 1));
+        let (current_col, tile_position) = target.layout.pos_in_scrolling_layout.unwrap_or((1, 1));
         let is_stacked = tile_position > 1;
 
         self.focus_window(window_id)?;
@@ -314,7 +356,9 @@ impl CompositorClient {
         let target_index = (effective_col as i32 + position_delta).max(1) as usize;
         tracing::trace!("moving column from {} to {}", effective_col, target_index);
 
-        let response = send_request(Request::Action(Action::MoveColumnToIndex { index: target_index }))?;
+        let response = send_request(Request::Action(Action::MoveColumnToIndex {
+            index: target_index,
+        }))?;
         validate_handled(response)?;
 
         if let Some(original_focus) = currently_focused {
@@ -329,7 +373,9 @@ impl CompositorClient {
 
 #[tracing::instrument(level = "TRACE", err)]
 fn send_request(request: Request) -> Result<Reply, CompositorIpcError> {
-    connect_socket()?.send(request).map_err(CompositorIpcError::Io)
+    connect_socket()?
+        .send(request)
+        .map_err(CompositorIpcError::Io)
 }
 
 #[tracing::instrument(level = "TRACE", err)]
@@ -374,7 +420,10 @@ impl NiriEventStream {
     }
 }
 
-fn run_event_stream(tx: Sender<CompositorEvent>, filter_workspace: bool) -> Result<(), CompositorIpcError> {
+fn run_event_stream(
+    tx: Sender<CompositorEvent>,
+    filter_workspace: bool,
+) -> Result<(), CompositorIpcError> {
     const MAX_BACKOFF_SECS: u64 = 30;
     let mut backoff_secs = 1u64;
     let mut window_state = WindowTracker::new();
@@ -400,7 +449,9 @@ fn try_run_event_stream(
     filter_workspace: bool,
 ) -> Result<(), CompositorIpcError> {
     let mut socket = connect_socket()?;
-    let response = socket.send(Request::EventStream).map_err(CompositorIpcError::Io)?;
+    let response = socket
+        .send(Request::EventStream)
+        .map_err(CompositorIpcError::Io)?;
     validate_handled(response)?;
 
     tracing::info!("event stream connected");
@@ -413,10 +464,10 @@ fn try_run_event_stream(
                 let is_config_reload = matches!(event, Event::ConfigLoaded { .. });
 
                 let events = window_state.process_event(event, filter_workspace);
-                for compositor_event in events {
+                events.into_iter().try_for_each(|compositor_event| {
                     tx.send_blocking(compositor_event)
-                        .map_err(|_| CompositorIpcError::EventChannelClosed)?;
-                }
+                        .map_err(|_| CompositorIpcError::EventChannelClosed)
+                })?;
 
                 if is_workspace_change {
                     tx.send_blocking(CompositorEvent::Workspaces)
@@ -458,10 +509,13 @@ enum TrackerState {
 
 impl WindowTracker {
     fn new() -> Self {
-        Self { state: None, focused_id: None }
+        Self {
+            state: None,
+            focused_id: None,
+        }
     }
 
-	#[tracing::instrument(level = "TRACE", skip(self))]
+    #[tracing::instrument(level = "TRACE", skip(self))]
     fn process_event(&mut self, event: Event, filter_workspace: bool) -> Vec<CompositorEvent> {
         use TrackerState::*;
 
@@ -474,7 +528,12 @@ impl WindowTracker {
                         active_per_workspace: std::collections::BTreeMap::new(),
                         last_focused_per_workspace: std::collections::BTreeMap::new(),
                     }),
-                    Some(Ready { workspaces, active_per_workspace, last_focused_per_workspace, .. }) => Some(Ready {
+                    Some(Ready {
+                        workspaces,
+                        active_per_workspace,
+                        last_focused_per_workspace,
+                        ..
+                    }) => Some(Ready {
                         windows: windows.iter().map(|w| (w.id, w.clone())).collect(),
                         workspaces,
                         active_per_workspace,
@@ -492,7 +551,12 @@ impl WindowTracker {
                         active_per_workspace: std::collections::BTreeMap::new(),
                         last_focused_per_workspace: std::collections::BTreeMap::new(),
                     }),
-                    Some(Ready { windows, active_per_workspace, last_focused_per_workspace, .. }) => Some(Ready {
+                    Some(Ready {
+                        windows,
+                        active_per_workspace,
+                        last_focused_per_workspace,
+                        ..
+                    }) => Some(Ready {
                         windows,
                         workspaces: workspaces.into_iter().map(|w| (w.id, w)).collect(),
                         active_per_workspace,
@@ -512,11 +576,18 @@ impl WindowTracker {
                 self.maybe_full_snapshot(filter_workspace)
             }
             Event::WindowOpenedOrChanged { window } => {
-                if let Some(Ready { windows, last_focused_per_workspace, .. }) = &mut self.state {
+                if let Some(Ready {
+                    windows,
+                    last_focused_per_workspace,
+                    ..
+                }) = &mut self.state
+                {
                     let is_new = !windows.contains_key(&window.id);
 
                     if window.is_focused {
-                        if let Some(old_focused) = windows.values().find(|w| w.is_focused).map(|w| w.id) {
+                        if let Some(old_focused) =
+                            windows.values().find(|w| w.is_focused).map(|w| w.id)
+                        {
                             if let Some(old_window) = windows.get(&old_focused) {
                                 if old_window.layout.pos_in_scrolling_layout.is_some() {
                                     if let Some(ws_id) = old_window.workspace_id {
@@ -548,19 +619,29 @@ impl WindowTracker {
                     }
 
                     if title_changed {
-                        return vec![CompositorEvent::WindowTitleChanged { id: win_id, title: new_title }];
+                        return vec![CompositorEvent::WindowTitleChanged {
+                            id: win_id,
+                            title: new_title,
+                        }];
                     }
 
-                    // Property change on existing window (e.g. layout change via WindowOpenedOrChanged)
-                    // — still needs full snapshot to recalculate ordering
+                    // Property change on existing window (e.g. layout change via
+                    // WindowOpenedOrChanged) — still needs full snapshot to
+                    // recalculate ordering
                     return self.maybe_full_snapshot(filter_workspace);
                 }
                 vec![]
             }
             Event::WindowFocusChanged { id } => {
                 let old = self.focused_id;
-                if let Some(Ready { windows, last_focused_per_workspace, .. }) = &mut self.state {
-                    if let Some(old_focused) = windows.values().find(|w| w.is_focused).map(|w| w.id) {
+                if let Some(Ready {
+                    windows,
+                    last_focused_per_workspace,
+                    ..
+                }) = &mut self.state
+                {
+                    if let Some(old_focused) = windows.values().find(|w| w.is_focused).map(|w| w.id)
+                    {
                         if let Some(window) = windows.get(&old_focused) {
                             if window.layout.pos_in_scrolling_layout.is_some() {
                                 if let Some(ws_id) = window.workspace_id {
@@ -591,17 +672,27 @@ impl WindowTracker {
                 if let Some(Ready { workspaces, .. }) = &mut self.state {
                     let activated_output = workspaces.get(&id).and_then(|ws| ws.output.clone());
 
-                    for ws in workspaces.values_mut() {
-                        if ws.output == activated_output {
-                            ws.is_active = ws.id == id;
-                        }
-                    }
+                    workspaces
+                        .values_mut()
+                        .filter(|ws| ws.output == activated_output)
+                        .for_each(|ws| ws.is_active = ws.id == id);
                 }
                 self.maybe_full_snapshot(filter_workspace)
             }
-            Event::WorkspaceActiveWindowChanged { workspace_id, active_window_id } => {
-                tracing::info!("workspace {} active window changed to {:?}", workspace_id, active_window_id);
-                if let Some(Ready { active_per_workspace, .. }) = &mut self.state {
+            Event::WorkspaceActiveWindowChanged {
+                workspace_id,
+                active_window_id,
+            } => {
+                tracing::info!(
+                    "workspace {} active window changed to {:?}",
+                    workspace_id,
+                    active_window_id
+                );
+                if let Some(Ready {
+                    active_per_workspace,
+                    ..
+                }) = &mut self.state
+                {
                     if let Some(win_id) = active_window_id {
                         active_per_workspace.insert(workspace_id, win_id);
                     } else {
@@ -623,123 +714,182 @@ impl WindowTracker {
                 }
                 self.maybe_full_snapshot(filter_workspace)
             }
-            _ => vec![]
+            _ => vec![],
         }
     }
 
     fn maybe_full_snapshot(&self, filter_workspace: bool) -> Vec<CompositorEvent> {
-        if let Some(TrackerState::Ready { windows, workspaces, active_per_workspace, last_focused_per_workspace }) = &self.state {
-            vec![CompositorEvent::FullSnapshot(self.generate_snapshot(windows, workspaces, active_per_workspace, last_focused_per_workspace, filter_workspace))]
+        if let Some(TrackerState::Ready {
+            windows,
+            workspaces,
+            active_per_workspace,
+            last_focused_per_workspace,
+        }) = &self.state
+        {
+            vec![CompositorEvent::FullSnapshot(self.generate_snapshot(
+                windows,
+                workspaces,
+                active_per_workspace,
+                last_focused_per_workspace,
+                filter_workspace,
+            ))]
         } else {
             vec![]
         }
     }
 
-	fn generate_snapshot(
-		&self,
-		windows: &std::collections::BTreeMap<u64, niri_ipc::Window>,
-		workspaces: &std::collections::BTreeMap<u64, Workspace>,
-		active_per_workspace: &std::collections::BTreeMap<u64, u64>,
-		last_focused_per_workspace: &std::collections::BTreeMap<u64, u64>,
-		filter_workspace: bool,
-	) -> WindowSnapshot {
-		struct WindowWithWorkspace<'a> {
-		    window: &'a niri_ipc::Window,
-		    workspace: &'a Workspace,
-		}
+    fn generate_snapshot(
+        &self,
+        windows: &std::collections::BTreeMap<u64, niri_ipc::Window>,
+        workspaces: &std::collections::BTreeMap<u64, Workspace>,
+        active_per_workspace: &std::collections::BTreeMap<u64, u64>,
+        last_focused_per_workspace: &std::collections::BTreeMap<u64, u64>,
+        filter_workspace: bool,
+    ) -> WindowSnapshot {
+        struct WindowWithWorkspace<'a> {
+            window: &'a niri_ipc::Window,
+            workspace: &'a Workspace,
+        }
 
-		let active_workspace_per_output: std::collections::HashMap<_, _> = workspaces
-		    .values()
-		    .filter(|ws| ws.is_active)
-		    .filter_map(|ws| ws.output.as_ref().map(|output| (output.clone(), ws.id)))
-		    .collect();
+        let active_workspace_per_output: std::collections::HashMap<_, _> = workspaces
+            .values()
+            .filter(|ws| ws.is_active)
+            .filter_map(|ws| ws.output.as_ref().map(|output| (output.clone(), ws.id)))
+            .collect();
 
-		let mut window_workspace_pairs: Vec<_> = windows
-		    .values()
-		    .filter_map(|window| {
-		        window.workspace_id.and_then(|ws_id| {
-		            workspaces.get(&ws_id).and_then(|ws| {
-		                if filter_workspace {
-		                    let is_active_on_output = ws.output.as_ref()
-		                        .and_then(|output| active_workspace_per_output.get(output))
-		                        .map(|active_ws_id| *active_ws_id == ws.id)
-		                        .unwrap_or(false);
-		                    
-		                    if !is_active_on_output {
-		                        return None;
-		                    }
-		                }
-		                Some(WindowWithWorkspace { window, workspace: ws })
-		            })
-		        })
-		    })
-		    .collect();
+        let mut window_workspace_pairs: Vec<_> = windows
+            .values()
+            .filter_map(|window| {
+                window.workspace_id.and_then(|ws_id| {
+                    workspaces.get(&ws_id).and_then(|ws| {
+                        if filter_workspace {
+                            let is_active_on_output = ws
+                                .output
+                                .as_ref()
+                                .and_then(|output| active_workspace_per_output.get(output))
+                                .map(|active_ws_id| *active_ws_id == ws.id)
+                                .unwrap_or(false);
 
-		let mut position_map: std::collections::HashMap<u64, (usize, usize)> = std::collections::HashMap::new();
-
-		for ws_id in window_workspace_pairs.iter().map(|p| p.workspace.id).collect::<std::collections::BTreeSet<_>>() {
-			let anchor_pos = last_focused_per_workspace.get(&ws_id)
-				.and_then(|win_id| {
-					window_workspace_pairs.iter()
-						.find(|p| p.window.id == *win_id)
-						.and_then(|p| p.window.layout.pos_in_scrolling_layout)
-				})
-				.unwrap_or_else(|| {
-					window_workspace_pairs.iter()
-						.filter(|p| p.workspace.id == ws_id && p.window.layout.pos_in_scrolling_layout.is_some())
-						.filter_map(|p| p.window.layout.pos_in_scrolling_layout)
-						.max_by_key(|pos| (pos.0, pos.1))
-						.unwrap_or((0, 0))
-				});
-
-			for pair in window_workspace_pairs.iter().filter(|p| p.workspace.id == ws_id && p.window.layout.pos_in_scrolling_layout.is_none()) {
-				position_map.insert(pair.window.id, (anchor_pos.0, anchor_pos.1 + 1));
-			}
-		}
-
-		window_workspace_pairs.sort_by(|a, b| {
-			a.workspace.idx
-				.cmp(&b.workspace.idx)
-				.then_with(|| {
-				    let a_pos = a.window.layout.pos_in_scrolling_layout.or_else(|| position_map.get(&a.window.id).copied()).unwrap_or((usize::MAX, 0));
-				    let b_pos = b.window.layout.pos_in_scrolling_layout.or_else(|| position_map.get(&b.window.id).copied()).unwrap_or((usize::MAX, 0));
-				    a_pos.0.cmp(&b_pos.0).then_with(|| a_pos.1.cmp(&b_pos.1))
-				})
-				.then_with(|| a.window.id.cmp(&b.window.id))
-		});
-
-		for pair in &window_workspace_pairs {
-		    let pos = pair.window.layout.pos_in_scrolling_layout
-		        .or_else(|| position_map.get(&pair.window.id).copied());
-		    tracing::debug!(
-		        window_id = pair.window.id,
-		        app_id = ?pair.window.app_id,
-		        workspace_idx = pair.workspace.idx,
-		        pos = ?pos,
-		        "snapshot order"
-		    );
-		}
-
-        let active_workspace = workspaces.values().find(|ws| ws.is_active).map(|ws| ws.id);
-        let overview_active = active_workspace.and_then(|ws_id| active_per_workspace.get(&ws_id).copied());
-        let has_focused = window_workspace_pairs.iter().any(|pair| pair.window.is_focused);
-
-        let highlight_window = if !has_focused {
-            overview_active.or_else(|| {
-                active_workspace.and_then(|ws_id| last_focused_per_workspace.get(&ws_id).copied())
-            }).or_else(|| {
-                active_workspace.and_then(|active_ws| {
-                    window_workspace_pairs.iter()
-                        .find(|pair| pair.workspace.id == active_ws)
-                        .map(|pair| pair.window.id)
+                            if !is_active_on_output {
+                                return None;
+                            }
+                        }
+                        Some(WindowWithWorkspace {
+                            window,
+                            workspace: ws,
+                        })
+                    })
                 })
             })
+            .collect();
+
+        let mut position_map: std::collections::HashMap<u64, (usize, usize)> =
+            std::collections::HashMap::new();
+
+        let workspace_ids: std::collections::BTreeSet<_> = window_workspace_pairs
+            .iter()
+            .map(|p| p.workspace.id)
+            .collect();
+        for ws_id in workspace_ids {
+            let anchor_pos = last_focused_per_workspace
+                .get(&ws_id)
+                .and_then(|win_id| {
+                    window_workspace_pairs
+                        .iter()
+                        .find(|p| p.window.id == *win_id)
+                        .and_then(|p| p.window.layout.pos_in_scrolling_layout)
+                })
+                .unwrap_or_else(|| {
+                    window_workspace_pairs
+                        .iter()
+                        .filter(|p| {
+                            p.workspace.id == ws_id
+                                && p.window.layout.pos_in_scrolling_layout.is_some()
+                        })
+                        .filter_map(|p| p.window.layout.pos_in_scrolling_layout)
+                        .max_by_key(|pos| (pos.0, pos.1))
+                        .unwrap_or((0, 0))
+                });
+
+            window_workspace_pairs
+                .iter()
+                .filter(|p| {
+                    p.workspace.id == ws_id && p.window.layout.pos_in_scrolling_layout.is_none()
+                })
+                .for_each(|pair| {
+                    position_map.insert(pair.window.id, (anchor_pos.0, anchor_pos.1 + 1));
+                });
+        }
+
+        window_workspace_pairs.sort_by(|a, b| {
+            a.workspace
+                .idx
+                .cmp(&b.workspace.idx)
+                .then_with(|| {
+                    let a_pos = a
+                        .window
+                        .layout
+                        .pos_in_scrolling_layout
+                        .or_else(|| position_map.get(&a.window.id).copied())
+                        .unwrap_or((usize::MAX, 0));
+                    let b_pos = b
+                        .window
+                        .layout
+                        .pos_in_scrolling_layout
+                        .or_else(|| position_map.get(&b.window.id).copied())
+                        .unwrap_or((usize::MAX, 0));
+                    a_pos.0.cmp(&b_pos.0).then_with(|| a_pos.1.cmp(&b_pos.1))
+                })
+                .then_with(|| a.window.id.cmp(&b.window.id))
+        });
+
+        for pair in &window_workspace_pairs {
+            let pos = pair
+                .window
+                .layout
+                .pos_in_scrolling_layout
+                .or_else(|| position_map.get(&pair.window.id).copied());
+            tracing::debug!(
+                window_id = pair.window.id,
+                app_id = ?pair.window.app_id,
+                workspace_idx = pair.workspace.idx,
+                pos = ?pos,
+                "snapshot order"
+            );
+        }
+
+        let active_workspace = workspaces.values().find(|ws| ws.is_active).map(|ws| ws.id);
+        let overview_active =
+            active_workspace.and_then(|ws_id| active_per_workspace.get(&ws_id).copied());
+        let has_focused = window_workspace_pairs
+            .iter()
+            .any(|pair| pair.window.is_focused);
+
+        let highlight_window = if !has_focused {
+            overview_active
+                .or_else(|| {
+                    active_workspace
+                        .and_then(|ws_id| last_focused_per_workspace.get(&ws_id).copied())
+                })
+                .or_else(|| {
+                    active_workspace.and_then(|active_ws| {
+                        window_workspace_pairs
+                            .iter()
+                            .find(|pair| pair.workspace.id == active_ws)
+                            .map(|pair| pair.window.id)
+                    })
+                })
         } else {
             None
         };
 
-        tracing::info!("snapshot: active_ws={:?}, overview={:?}, last_focused={:?}, highlight={:?}",
-            active_workspace, overview_active, last_focused_per_workspace, highlight_window);
+        tracing::info!(
+            "snapshot: active_ws={:?}, overview={:?}, last_focused={:?}, highlight={:?}",
+            active_workspace,
+            overview_active,
+            last_focused_per_workspace,
+            highlight_window
+        );
 
         window_workspace_pairs
             .into_iter()

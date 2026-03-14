@@ -7,12 +7,16 @@ use std::{
 use futures::StreamExt;
 use settings::Settings;
 use thiserror::Error;
-use tracing_subscriber::{EnvFilter, fmt::format::FmtSpan};
+use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
 use waybar_cffi::{
-    Module,
-    gtk::{self, Orientation, gio, glib::MainContext, traits::{BoxExt, ContainerExt, WidgetExt}},
+    gtk::{
+        self, gio,
+        glib::MainContext,
+        traits::{BoxExt, ContainerExt, WidgetExt},
+        Orientation,
+    },
     sys::wbcffi_module,
-    waybar_module,
+    waybar_module, Module,
 };
 
 mod audio;
@@ -33,15 +37,17 @@ mod title;
 mod wayland;
 
 use audio::AudioState;
+use button::WindowButton;
 use compositor::{CompositorClient, WindowInfo, WindowSnapshot};
 use event_stream::EventMessage;
 use icons::IconResolver;
 use notifications::NotificationData;
 use process_info::ProcessInfo;
-use taskbar::{SelectionState, FocusedWindow, create_selection_state, create_focused_window, clear_selection};
+use taskbar::{
+    clear_selection, create_focused_window, create_selection_state, FocusedWindow, SelectionState,
+};
 use theme::BorderColors;
 use wayland::WaylandActivator;
-use button::WindowButton;
 
 // ── Errors (inlined from errors.rs) ──
 
@@ -151,7 +157,7 @@ static LOGGING: LazyLock<()> = LazyLock::new(|| {
     if let Err(e) = tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("niri_waybar_windowlist=info"))
+                .unwrap_or_else(|_| EnvFilter::new("niri_waybar_windowlist=info")),
         )
         .with_span_events(FmtSpan::CLOSE)
         .with_timer(tracing_subscriber::fmt::time::uptime())
@@ -189,7 +195,8 @@ impl Module for WindowButtonsModule {
         *LOGGING;
 
         let raw_info = unsafe {
-            let ptr: *const *const waybar_cffi::sys::wbcffi_init_info = std::ptr::from_ref(info).cast();
+            let ptr: *const *const waybar_cffi::sys::wbcffi_init_info =
+                std::ptr::from_ref(info).cast();
             &**ptr
         };
         let updater = WaybarUpdater {
@@ -210,7 +217,11 @@ impl Module for WindowButtonsModule {
 
 waybar_module!(WindowButtonsModule);
 
-async fn initialize_module(info: &waybar_cffi::InitInfo, state: SharedState, updater: WaybarUpdater) -> Result<(), CompositorIpcError> {
+async fn initialize_module(
+    info: &waybar_cffi::InitInfo,
+    state: SharedState,
+    updater: WaybarUpdater,
+) -> Result<(), CompositorIpcError> {
     let root = info.get_root_widget();
 
     let container = gtk::Box::new(Orientation::Horizontal, 0);
@@ -221,7 +232,9 @@ async fn initialize_module(info: &waybar_cffi::InitInfo, state: SharedState, upd
 
     let context = MainContext::default();
     context.spawn_local(async move {
-        ModuleInstance::create(state, container, updater).run_event_loop().await
+        ModuleInstance::create(state, container, updater)
+            .run_event_loop()
+            .await
     });
 
     Ok(())
@@ -270,7 +283,8 @@ impl ModuleInstance {
                 EventMessage::Notification(notif) => self.handle_notification(notif).await,
                 EventMessage::AudioUpdate(state) => self.handle_audio_update(state),
                 EventMessage::FullSnapshot(snapshot) => {
-                    self.handle_window_update(snapshot, display_filter.clone()).await
+                    self.handle_window_update(snapshot, display_filter.clone())
+                        .await
                 }
                 EventMessage::FocusChanged { old, new } => {
                     self.handle_focus_change(old, new);
@@ -284,9 +298,9 @@ impl ModuleInstance {
                 EventMessage::ConfigReloaded => {
                     tracing::info!("config reloaded, refreshing border colors");
                     self.state.reload_border_colors();
-                    for button in self.buttons.values() {
-                        button.get_widget().queue_draw();
-                    }
+                    self.buttons
+                        .values()
+                        .for_each(|button| button.get_widget().queue_draw());
                 }
                 EventMessage::Workspaces(_) => {
                     let updated_filter = self.determine_display_filter().await;
@@ -330,14 +344,10 @@ impl ModuleInstance {
         let compositor = self.state.compositor().clone();
         let outputs = compositor.query_outputs().ok()?;
 
-        for (output_name, output_info) in outputs.into_iter() {
-            let match_result = screen::OutputMatcher::compare(&monitor, &output_info);
-            if match_result == screen::OutputMatcher::all() {
-                return Some(output_name);
-            }
-        }
-
-        None
+        outputs.into_iter().find_map(|(output_name, output_info)| {
+            (screen::OutputMatcher::compare(&monitor, &output_info) == screen::OutputMatcher::all())
+                .then_some(output_name)
+        })
     }
 
     #[tracing::instrument(level = "DEBUG", skip(self))]
@@ -347,7 +357,8 @@ impl ModuleInstance {
         }
 
         let compositor = self.state.compositor().clone();
-        let available_outputs = match gio::spawn_blocking(move || compositor.query_outputs()).await {
+        let available_outputs = match gio::spawn_blocking(move || compositor.query_outputs()).await
+        {
             Ok(Ok(outputs)) => outputs,
             Ok(Err(e)) => {
                 tracing::warn!(%e, "failed to query compositor outputs");
@@ -375,15 +386,17 @@ impl ModuleInstance {
             return screen::DisplayFilter::ShowAll;
         };
 
-        for (output_name, output_info) in available_outputs.into_iter() {
-            let match_result = screen::OutputMatcher::compare(&monitor, &output_info);
-            if match_result == screen::OutputMatcher::all() {
-                return screen::DisplayFilter::Only(output_name);
-            }
-        }
-
-        tracing::warn!(?monitor, "no matching compositor output found");
-        screen::DisplayFilter::ShowAll
+        available_outputs
+            .into_iter()
+            .find_map(|(output_name, output_info)| {
+                (screen::OutputMatcher::compare(&monitor, &output_info)
+                    == screen::OutputMatcher::all())
+                .then(|| screen::DisplayFilter::Only(output_name))
+            })
+            .unwrap_or_else(|| {
+                tracing::warn!(?monitor, "no matching compositor output found");
+                screen::DisplayFilter::ShowAll
+            })
     }
 
     #[tracing::instrument(level = "TRACE", skip(self))]
@@ -402,8 +415,12 @@ impl ModuleInstance {
                 if let Some(window) = process_map.lookup(process_id) {
                     if !window.is_focused {
                         if let Some(button) = self.buttons.get(&window.id) {
-                            tracing::trace!(?button, ?window, process_id,
-                                "marking window as urgent via PID match");
+                            tracing::trace!(
+                                ?button,
+                                ?window,
+                                process_id,
+                                "marking window as urgent via PID match"
+                            );
                             button.mark_urgent();
                             matched = true;
                         }
@@ -445,11 +462,17 @@ impl ModuleInstance {
         let fuzzy_enabled = self.state.settings().notifications_use_fuzzy_matching();
         let mut fuzzy_matches = Vec::new();
 
-        let mapped_entry = self.state.settings()
+        let mapped_entry = self
+            .state
+            .settings()
             .notifications_app_map(desktop_entry)
             .unwrap_or(desktop_entry);
         let entry_lower = mapped_entry.to_lowercase();
-        let entry_suffix = mapped_entry.split('.').next_back().unwrap_or_default().to_lowercase();
+        let entry_suffix = mapped_entry
+            .split('.')
+            .next_back()
+            .unwrap_or_default()
+            .to_lowercase();
 
         let mut exact_match = false;
         for window in windows.iter() {
@@ -459,21 +482,23 @@ impl ModuleInstance {
 
             if app_identifier == mapped_entry {
                 if let Some(button) = self.buttons.get(&window.id) {
-                    tracing::trace!(app_identifier, ?button, ?window,
-                        "exact app ID match for notification");
+                    tracing::trace!(
+                        app_identifier,
+                        ?button,
+                        ?window,
+                        "exact app ID match for notification"
+                    );
                     button.mark_urgent();
                     exact_match = true;
                 }
             } else if fuzzy_enabled {
                 if app_identifier.to_lowercase() == entry_lower {
-                    tracing::trace!(app_identifier, ?window,
-                        "case-insensitive app ID match");
+                    tracing::trace!(app_identifier, ?window, "case-insensitive app ID match");
                     fuzzy_matches.push(window.id);
                 } else if app_identifier.contains('.') {
                     if let Some(suffix) = app_identifier.split('.').next_back() {
                         if suffix.to_lowercase() == entry_suffix {
-                            tracing::trace!(app_identifier, ?window,
-                                "suffix-based app ID match");
+                            tracing::trace!(app_identifier, ?window, "suffix-based app ID match");
                             fuzzy_matches.push(window.id);
                         }
                     }
@@ -508,7 +533,8 @@ impl ModuleInstance {
         let config = self.state.settings();
 
         for window in snapshot.iter().filter(|w| {
-            let should_display = filter.lock()
+            let should_display = filter
+                .lock()
                 .map(|f| f.should_display(w.get_output().unwrap_or_default()))
                 .unwrap_or(true);
             if !should_display {
@@ -516,7 +542,7 @@ impl ModuleInstance {
             }
             if let Some(_app_id) = &w.app_id {
                 if config.should_ignore(w.app_id.as_deref(), w.title.as_deref(), w.workspace_id) {
-                   return false;
+                    return false;
                 }
             }
             true
@@ -526,7 +552,12 @@ impl ModuleInstance {
             }
 
             let button = self.buttons.entry(window.id).or_insert_with(|| {
-                let btn = WindowButton::create(&self.state, window, self.selection.clone(), self.focused_window.clone());
+                let btn = WindowButton::create(
+                    &self.state,
+                    window,
+                    self.selection.clone(),
+                    self.focused_window.clone(),
+                );
                 self.container.pack_start(btn.get_widget(), true, true, 0);
                 btn
             });
@@ -589,9 +620,13 @@ impl ModuleInstance {
     fn handle_process_info_tick(&mut self) {
         let mut any_changed = false;
 
-        let pids_to_query: Vec<_> = self.window_pids.iter()
+        let pids_to_query: Vec<_> = self
+            .window_pids
+            .iter()
             .filter(|(wid, _)| {
-                self.buttons.get(wid).map_or(false, |b| b.process_info_enabled())
+                self.buttons
+                    .get(wid)
+                    .map_or(false, |b| b.process_info_enabled())
             })
             .map(|(&wid, &pid)| (wid, pid))
             .collect();
@@ -621,10 +656,13 @@ impl ModuleInstance {
     }
 
     fn update_button_audio_states(&self) {
-        let mut pid_window_count: HashMap<u32, usize> = HashMap::new();
-        for &pid in self.window_pids.values() {
-            *pid_window_count.entry(pid).or_insert(0) += 1;
-        }
+        let pid_window_count: HashMap<u32, usize> =
+            self.window_pids
+                .values()
+                .fold(HashMap::new(), |mut counts, &pid| {
+                    *counts.entry(pid).or_insert(0) += 1;
+                    counts
+                });
 
         for (window_id, button) in &self.buttons {
             let Some(&pid) = self.window_pids.get(window_id) else {
@@ -636,7 +674,8 @@ impl ModuleInstance {
                 continue;
             };
             if pid_window_count.get(&pid).copied().unwrap_or(1) > 1 {
-                let focused_has_pid = self.previous_focused
+                let focused_has_pid = self
+                    .previous_focused
                     .and_then(|fid| self.window_pids.get(&fid))
                     .map(|&fpid| fpid == pid)
                     .unwrap_or(false);
@@ -657,7 +696,7 @@ impl<'a> ProcessWindowMap<'a> {
         Self(
             windows
                 .filter_map(|w| w.pid.map(|pid| (i64::from(pid), w)))
-                .collect()
+                .collect(),
         )
     }
 

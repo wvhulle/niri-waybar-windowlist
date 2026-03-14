@@ -1,11 +1,13 @@
 use std::sync::{Arc, Mutex};
+
 use wayland_client::{
-    Connection, Dispatch, QueueHandle, delegate_noop, event_created_child,
+    delegate_noop, event_created_child,
     protocol::{wl_registry, wl_seat},
+    Connection, Dispatch, QueueHandle,
 };
 use wayland_protocols_wlr::foreign_toplevel::v1::client::{
-    zwlr_foreign_toplevel_manager_v1::{self, ZwlrForeignToplevelManagerV1},
     zwlr_foreign_toplevel_handle_v1::{self, ZwlrForeignToplevelHandleV1},
+    zwlr_foreign_toplevel_manager_v1::{self, ZwlrForeignToplevelManagerV1},
 };
 
 struct ToplevelInfo {
@@ -19,8 +21,9 @@ struct SharedData {
     toplevels: Vec<ToplevelInfo>,
 }
 
-/// Thread-safe handle for activating windows via the Wayland `wlr-foreign-toplevel-management` protocol.
-/// Sends `activate` requests directly over the Wayland connection instead of niri IPC.
+/// Thread-safe handle for activating windows via the Wayland
+/// `wlr-foreign-toplevel-management` protocol. Sends `activate` requests
+/// directly over the Wayland connection instead of niri IPC.
 #[derive(Clone)]
 pub struct WaylandActivator {
     shared: Arc<Mutex<SharedData>>,
@@ -108,7 +111,7 @@ impl WaylandActivator {
             return false;
         };
 
-        for tl in &data.toplevels {
+        let matched = data.toplevels.iter().find(|tl| {
             let app_match = match (app_id, &tl.app_id) {
                 (Some(a), Some(b)) => a == b,
                 (None, None) => true,
@@ -119,17 +122,18 @@ impl WaylandActivator {
                 (None, None) => true,
                 _ => false,
             };
+            app_match && title_match
+        });
 
-            if app_match && title_match {
-                tl.handle.activate(seat);
-                drop(data);
-                let _ = self.conn.flush();
-                return true;
-            }
+        if let Some(tl) = matched {
+            tl.handle.activate(seat);
+            drop(data);
+            let _ = self.conn.flush();
+            true
+        } else {
+            tracing::debug!(?app_id, ?title, "no Wayland toplevel matched");
+            false
         }
-
-        tracing::debug!(?app_id, ?title, "no Wayland toplevel matched");
-        false
     }
 }
 
@@ -153,7 +157,12 @@ impl Dispatch<wl_registry::WlRegistry, ()> for DispatchState {
         _conn: &Connection,
         qh: &QueueHandle<Self>,
     ) {
-        if let wl_registry::Event::Global { name, interface, version } = event {
+        if let wl_registry::Event::Global {
+            name,
+            interface,
+            version,
+        } = event
+        {
             match interface.as_str() {
                 "wl_seat" => {
                     let seat = registry.bind::<wl_seat::WlSeat, _, _>(name, version.min(8), qh, ());

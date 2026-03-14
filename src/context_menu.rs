@@ -1,12 +1,12 @@
 use std::process::Command;
+
 use waybar_cffi::gtk::{
-    Menu, MenuItem,
     gdk,
     prelude::{GtkMenuExt, GtkMenuItemExt, MenuShellExt, WidgetExt},
+    Menu, MenuItem,
 };
-use crate::settings::ModifierKey;
-use crate::taskbar::clear_selection;
-use crate::button::WindowButton;
+
+use crate::{button::WindowButton, settings::ModifierKey, taskbar::clear_selection};
 
 impl WindowButton {
     #[tracing::instrument(level = "TRACE", skip(self))]
@@ -29,7 +29,13 @@ impl WindowButton {
                 if let Some(ref cmd) = command {
                     Self::execute_command(cmd, window_id, app_id.as_deref(), title.as_deref());
                 } else if let Some(ref act) = action {
-                    Self::execute_action(&state, window_id, act, app_id.as_deref(), title.as_deref());
+                    Self::execute_action(
+                        &state,
+                        window_id,
+                        act,
+                        app_id.as_deref(),
+                        title.as_deref(),
+                    );
                 }
             });
         }
@@ -56,7 +62,11 @@ impl WindowButton {
             let windows = selected_windows.clone();
             item.connect_activate(move |_| {
                 if let Some(ref cmd) = command {
-                    let windows_str = windows.iter().map(|w| w.to_string()).collect::<Vec<_>>().join(",");
+                    let windows_str = windows
+                        .iter()
+                        .map(|w| w.to_string())
+                        .collect::<Vec<_>>()
+                        .join(",");
                     let cmd = cmd.replace("{window_ids}", &windows_str);
                     std::thread::spawn(move || {
                         if let Err(e) = Command::new("sh").arg("-c").arg(&cmd).spawn() {
@@ -74,7 +84,10 @@ impl WindowButton {
         menu.popup_at_pointer(None);
     }
 
-    pub(crate) fn check_modifier_from_event(event: &gdk::EventButton, modifier: ModifierKey) -> bool {
+    pub(crate) fn check_modifier_from_event(
+        event: &gdk::EventButton,
+        modifier: ModifierKey,
+    ) -> bool {
         let state = event.state();
         match modifier {
             ModifierKey::Ctrl => state.contains(gdk::ModifierType::CONTROL_MASK),

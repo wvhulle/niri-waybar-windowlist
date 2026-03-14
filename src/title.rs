@@ -1,6 +1,12 @@
-use waybar_cffi::gtk::{self as gtk, prelude::{LabelExt, WidgetExt}};
-use crate::settings::{FontStyle, ProcessInfoLayout, ProcessInfoSource};
-use crate::button::WindowButton;
+use waybar_cffi::gtk::{
+    self as gtk,
+    prelude::{LabelExt, WidgetExt},
+};
+
+use crate::{
+    button::WindowButton,
+    settings::{FontStyle, ProcessInfoLayout, ProcessInfoSource},
+};
 
 fn font_style_to_pango(style: FontStyle) -> (gtk::pango::Weight, gtk::pango::Style) {
     match style {
@@ -59,7 +65,9 @@ impl WindowButton {
             let config = self.state.settings().process_info();
             if config.source == ProcessInfoSource::TitleRegex {
                 if let Some(text) = title {
-                    let pattern = self.app_id.as_deref()
+                    let pattern = self
+                        .app_id
+                        .as_deref()
                         .and_then(|id| self.state.settings().process_info_pattern(id));
                     if let Some(re) = pattern {
                         if let Some(caps) = re.captures(text) {
@@ -98,7 +106,8 @@ impl WindowButton {
 
         let config = self.state.settings().process_info();
 
-        let formatted_cwd = cwd.map(|c| format_cwd(c, config.shorten_home, config.show_basename_only));
+        let formatted_cwd =
+            cwd.map(|c| format_cwd(c, config.shorten_home, config.show_basename_only));
 
         if formatted_cwd.is_none() && command.is_none() {
             let title = self.title.borrow();

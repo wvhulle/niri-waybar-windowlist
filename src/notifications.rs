@@ -1,14 +1,15 @@
 use std::{ops::Deref, time::Duration};
+
 use async_channel::Sender;
 use futures::{Stream, TryStreamExt};
 use itertools::Itertools;
 use serde::{Deserialize, Deserializer};
 use waybar_cffi::gtk::glib;
 use zbus::{
-    Connection, MatchRule, Message, MessageStream,
     fdo::MonitoringProxy,
     names::{InterfaceName, MemberName},
     zvariant::{DeserializeDict, Optional, Type},
+    Connection, MatchRule, Message, MessageStream,
 };
 
 mod pid_cache;

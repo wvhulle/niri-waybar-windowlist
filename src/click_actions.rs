@@ -1,12 +1,21 @@
-use std::{cell::{Cell, RefCell}, process::Command, rc::Rc, time::{Duration, Instant}};
+use std::{
+    cell::{Cell, RefCell},
+    process::Command,
+    rc::Rc,
+    time::{Duration, Instant},
+};
+
 use waybar_cffi::gtk::{
     self as gtk, gdk,
     prelude::{Cast, ContainerExt, WidgetExt},
 };
-use crate::settings::MultiSelectAction;
-use crate::taskbar::{clear_selection, scroll_taskbar, set_background_color, FocusedWindow};
-use crate::button::WindowButton;
-use crate::SharedState;
+
+use crate::{
+    button::WindowButton,
+    settings::MultiSelectAction,
+    taskbar::{clear_selection, scroll_taskbar, set_background_color, FocusedWindow},
+    SharedState,
+};
 
 impl WindowButton {
     pub(crate) fn setup_click_handlers(&self, window_id: u64) {
@@ -21,43 +30,70 @@ impl WindowButton {
         let indicator_color_release = self.indicator_color.clone();
         let last_click_release = Rc::new(RefCell::new(Instant::now() - Duration::from_secs(1)));
 
-        self.event_box.connect_button_release_event(move |btn, event| {
-            if event.button() == 1 {
-                if *skip_release.borrow() {
-                    *skip_release.borrow_mut() = false;
-                    return gtk::glib::Propagation::Stop;
-                }
+        self.event_box
+            .connect_button_release_event(move |btn, event| {
+                if event.button() == 1 {
+                    if *skip_release.borrow() {
+                        *skip_release.borrow_mut() = false;
+                        return gtk::glib::Propagation::Stop;
+                    }
 
-                let is_currently_focused = focused_release.get() == Some(window_id);
-                let app_id_ref = app_id_release.as_deref();
-                let title_ref = title_release.borrow();
-                let title_str = title_ref.as_deref();
-                let actions = state_release.settings().get_click_actions(app_id_ref, title_str);
+                    let is_currently_focused = focused_release.get() == Some(window_id);
+                    let app_id_ref = app_id_release.as_deref();
+                    let title_ref = title_release.borrow();
+                    let title_str = title_ref.as_deref();
+                    let actions = state_release
+                        .settings()
+                        .get_click_actions(app_id_ref, title_str);
 
-                if is_currently_focused {
-                    let mut last_click = last_click_release.borrow_mut();
-                    let now = Instant::now();
-                    let time_since_last = now.duration_since(*last_click);
+                    if is_currently_focused {
+                        let mut last_click = last_click_release.borrow_mut();
+                        let now = Instant::now();
+                        let time_since_last = now.duration_since(*last_click);
 
-                    if time_since_last < Duration::from_millis(300) {
-                        clear_selection(&selection_release);
-                        Self::execute_click_action(&state_release, window_id, &actions.double_click, app_id_ref, title_str);
-                        *last_click = Instant::now() - Duration::from_secs(1);
+                        if time_since_last < Duration::from_millis(300) {
+                            clear_selection(&selection_release);
+                            Self::execute_click_action(
+                                &state_release,
+                                window_id,
+                                &actions.double_click,
+                                app_id_ref,
+                                title_str,
+                            );
+                            *last_click = Instant::now() - Duration::from_secs(1);
+                        } else {
+                            clear_selection(&selection_release);
+                            Self::execute_click_action(
+                                &state_release,
+                                window_id,
+                                &actions.left_click_focused,
+                                app_id_ref,
+                                title_str,
+                            );
+                            *last_click = now;
+                        }
                     } else {
                         clear_selection(&selection_release);
-                        Self::execute_click_action(&state_release, window_id, &actions.left_click_focused, app_id_ref, title_str);
-                        *last_click = now;
+                        Self::optimistic_focus(
+                            btn,
+                            window_id,
+                            &focused_release,
+                            &indicator_color_release,
+                            &state_release,
+                        );
+                        Self::execute_click_action(
+                            &state_release,
+                            window_id,
+                            &actions.left_click_unfocused,
+                            app_id_ref,
+                            title_str,
+                        );
                     }
+                    gtk::glib::Propagation::Stop
                 } else {
-                    clear_selection(&selection_release);
-                    Self::optimistic_focus(btn, window_id, &focused_release, &indicator_color_release, &state_release);
-                    Self::execute_click_action(&state_release, window_id, &actions.left_click_unfocused, app_id_ref, title_str);
+                    gtk::glib::Propagation::Proceed
                 }
-                gtk::glib::Propagation::Stop
-            } else {
-                gtk::glib::Propagation::Proceed
-            }
-        });
+            });
 
         let state_press = self.state.clone();
         let event_box_press = self.event_box.clone();
@@ -70,76 +106,110 @@ impl WindowButton {
         let skip_press = self.skip_clicked.clone();
         let selected_bg = gdk::RGBA::new(0.5, 0.5, 0.5, 0.3);
 
-        self.event_box.connect_button_press_event(move |btn, event| {
-            if event.button() == 1 {
-                let modifier_held = Self::check_modifier_from_event(event, state_press.settings().multi_select_modifier());
-                if modifier_held {
-                    *skip_press.borrow_mut() = true;
-                    let mut sel = selection_press.borrow_mut();
-                    if sel.contains_key(&window_id) {
-                        sel.remove(&window_id);
-                        set_background_color(&event_box_press, None);
-                    } else {
-                        sel.insert(window_id, event_box_press.clone());
-                        set_background_color(&event_box_press, Some(&selected_bg));
-                    }
-                } else {
-                    let is_currently_focused = focused_press.get() == Some(window_id);
-                    if !is_currently_focused {
+        self.event_box
+            .connect_button_press_event(move |btn, event| {
+                if event.button() == 1 {
+                    let modifier_held = Self::check_modifier_from_event(
+                        event,
+                        state_press.settings().multi_select_modifier(),
+                    );
+                    if modifier_held {
                         *skip_press.borrow_mut() = true;
-                        clear_selection(&selection_press);
-                        Self::optimistic_focus(btn, window_id, &focused_press, &indicator_color_press, &state_press);
-                        let app_id_ref = app_id_press.as_deref();
-                        let title_ref = title_press.borrow();
-                        let title_str = title_ref.as_deref();
-                        let actions = state_press.settings().get_click_actions(app_id_ref, title_str);
-                        Self::execute_click_action(&state_press, window_id, &actions.left_click_unfocused, app_id_ref, title_str);
+                        let mut sel = selection_press.borrow_mut();
+                        if sel.contains_key(&window_id) {
+                            sel.remove(&window_id);
+                            set_background_color(&event_box_press, None);
+                        } else {
+                            sel.insert(window_id, event_box_press.clone());
+                            set_background_color(&event_box_press, Some(&selected_bg));
+                        }
+                    } else {
+                        let is_currently_focused = focused_press.get() == Some(window_id);
+                        if !is_currently_focused {
+                            *skip_press.borrow_mut() = true;
+                            clear_selection(&selection_press);
+                            Self::optimistic_focus(
+                                btn,
+                                window_id,
+                                &focused_press,
+                                &indicator_color_press,
+                                &state_press,
+                            );
+                            let app_id_ref = app_id_press.as_deref();
+                            let title_ref = title_press.borrow();
+                            let title_str = title_ref.as_deref();
+                            let actions = state_press
+                                .settings()
+                                .get_click_actions(app_id_ref, title_str);
+                            Self::execute_click_action(
+                                &state_press,
+                                window_id,
+                                &actions.left_click_unfocused,
+                                app_id_ref,
+                                title_str,
+                            );
+                        }
                     }
-                }
-                gtk::glib::Propagation::Proceed
-            } else if event.button() == 2 {
-                let is_currently_focused = focused_press.get() == Some(window_id);
-                let app_id_ref = app_id_press.as_deref();
-                let title_ref = title_press.borrow();
-                let title_str = title_ref.as_deref();
-                let actions = state_press.settings().get_click_actions(app_id_ref, title_str);
-                let action = if is_currently_focused {
-                    &actions.middle_click_focused
-                } else {
-                    &actions.middle_click_unfocused
-                };
-                if action.is_menu() {
-                    menu_self.display_context_menu(window_id);
-                } else {
-                    Self::execute_click_action(&state_press, window_id, action, app_id_ref, title_str);
-                }
-                gtk::glib::Propagation::Stop
-            } else if event.button() == 3 {
-                let selection_count = selection_press.borrow().len();
-                if selection_count > 0 {
-                    menu_self.display_multi_select_menu();
-                } else {
+                    gtk::glib::Propagation::Proceed
+                } else if event.button() == 2 {
                     let is_currently_focused = focused_press.get() == Some(window_id);
                     let app_id_ref = app_id_press.as_deref();
                     let title_ref = title_press.borrow();
                     let title_str = title_ref.as_deref();
-                    let actions = state_press.settings().get_click_actions(app_id_ref, title_str);
+                    let actions = state_press
+                        .settings()
+                        .get_click_actions(app_id_ref, title_str);
                     let action = if is_currently_focused {
-                        &actions.right_click_focused
+                        &actions.middle_click_focused
                     } else {
-                        &actions.right_click_unfocused
+                        &actions.middle_click_unfocused
                     };
                     if action.is_menu() {
                         menu_self.display_context_menu(window_id);
                     } else {
-                        Self::execute_click_action(&state_press, window_id, action, app_id_ref, title_str);
+                        Self::execute_click_action(
+                            &state_press,
+                            window_id,
+                            action,
+                            app_id_ref,
+                            title_str,
+                        );
                     }
+                    gtk::glib::Propagation::Stop
+                } else if event.button() == 3 {
+                    let selection_count = selection_press.borrow().len();
+                    if selection_count > 0 {
+                        menu_self.display_multi_select_menu();
+                    } else {
+                        let is_currently_focused = focused_press.get() == Some(window_id);
+                        let app_id_ref = app_id_press.as_deref();
+                        let title_ref = title_press.borrow();
+                        let title_str = title_ref.as_deref();
+                        let actions = state_press
+                            .settings()
+                            .get_click_actions(app_id_ref, title_str);
+                        let action = if is_currently_focused {
+                            &actions.right_click_focused
+                        } else {
+                            &actions.right_click_unfocused
+                        };
+                        if action.is_menu() {
+                            menu_self.display_context_menu(window_id);
+                        } else {
+                            Self::execute_click_action(
+                                &state_press,
+                                window_id,
+                                action,
+                                app_id_ref,
+                                title_str,
+                            );
+                        }
+                    }
+                    gtk::glib::Propagation::Stop
+                } else {
+                    gtk::glib::Propagation::Proceed
                 }
-                gtk::glib::Propagation::Stop
-            } else {
-                gtk::glib::Propagation::Proceed
-            }
-        });
+            });
 
         let state_scroll = self.state.clone();
         let app_id_scroll = self.app_id.clone();
@@ -150,14 +220,20 @@ impl WindowButton {
             let app_id_ref = app_id_scroll.as_deref();
             let title_ref = title_scroll.borrow();
             let title_str = title_ref.as_deref();
-            let actions = state_scroll.settings().get_click_actions(app_id_ref, title_str);
+            let actions = state_scroll
+                .settings()
+                .get_click_actions(app_id_ref, title_str);
 
             let (action, scroll_delta) = match event.direction() {
                 ScrollDirection::Up => (&actions.scroll_up, -1.0),
                 ScrollDirection::Down => (&actions.scroll_down, 1.0),
                 ScrollDirection::Smooth => {
                     let (delta_x, delta_y) = event.delta();
-                    let delta = if delta_x.abs() > delta_y.abs() { delta_x } else { delta_y };
+                    let delta = if delta_x.abs() > delta_y.abs() {
+                        delta_x
+                    } else {
+                        delta_y
+                    };
                     if delta < -0.01 {
                         (&actions.scroll_up, delta)
                     } else if delta > 0.01 {
@@ -219,7 +295,13 @@ impl WindowButton {
         }
     }
 
-    pub(crate) fn execute_action(state: &SharedState, window_id: u64, action: &crate::settings::WindowAction, app_id: Option<&str>, title: Option<&str>) {
+    pub(crate) fn execute_action(
+        state: &SharedState,
+        window_id: u64,
+        action: &crate::settings::WindowAction,
+        app_id: Option<&str>,
+        title: Option<&str>,
+    ) {
         use crate::settings::WindowAction;
         match action {
             WindowAction::None => {}
@@ -261,7 +343,10 @@ impl WindowButton {
                 }
             }
             WindowAction::ExpandColumnToAvailableWidth => {
-                if let Err(e) = state.compositor().expand_column_to_available_width(window_id) {
+                if let Err(e) = state
+                    .compositor()
+                    .expand_column_to_available_width(window_id)
+                {
                     tracing::warn!(%e, id = window_id, "expand column failed");
                 }
             }
@@ -366,22 +451,34 @@ impl WindowButton {
                 }
             }
             WindowAction::MoveWindowDownOrToWorkspaceDown => {
-                if let Err(e) = state.compositor().move_window_down_or_to_workspace_down(window_id) {
+                if let Err(e) = state
+                    .compositor()
+                    .move_window_down_or_to_workspace_down(window_id)
+                {
                     tracing::warn!(%e, id = window_id, "move window down or to workspace down failed");
                 }
             }
             WindowAction::MoveWindowUpOrToWorkspaceUp => {
-                if let Err(e) = state.compositor().move_window_up_or_to_workspace_up(window_id) {
+                if let Err(e) = state
+                    .compositor()
+                    .move_window_up_or_to_workspace_up(window_id)
+                {
                     tracing::warn!(%e, id = window_id, "move window up or to workspace up failed");
                 }
             }
             WindowAction::MoveColumnLeftOrToMonitorLeft => {
-                if let Err(e) = state.compositor().move_column_left_or_to_monitor_left(window_id) {
+                if let Err(e) = state
+                    .compositor()
+                    .move_column_left_or_to_monitor_left(window_id)
+                {
                     tracing::warn!(%e, id = window_id, "move column left or to monitor left failed");
                 }
             }
             WindowAction::MoveColumnRightOrToMonitorRight => {
-                if let Err(e) = state.compositor().move_column_right_or_to_monitor_right(window_id) {
+                if let Err(e) = state
+                    .compositor()
+                    .move_column_right_or_to_monitor_right(window_id)
+                {
                     tracing::warn!(%e, id = window_id, "move column right or to monitor right failed");
                 }
             }
@@ -389,7 +486,12 @@ impl WindowButton {
         }
     }
 
-    pub(crate) fn execute_command(command: &str, window_id: u64, app_id: Option<&str>, title: Option<&str>) {
+    pub(crate) fn execute_command(
+        command: &str,
+        window_id: u64,
+        app_id: Option<&str>,
+        title: Option<&str>,
+    ) {
         let cmd = command
             .replace("{window_id}", &window_id.to_string())
             .replace("{app_id}", app_id.unwrap_or(""))
@@ -402,24 +504,50 @@ impl WindowButton {
         });
     }
 
-    pub(crate) fn execute_multi_select_action(state: &SharedState, window_ids: &[u64], action: &MultiSelectAction) {
+    pub(crate) fn execute_multi_select_action(
+        state: &SharedState,
+        window_ids: &[u64],
+        action: &MultiSelectAction,
+    ) {
         for &window_id in window_ids {
             let result = match action {
                 MultiSelectAction::CloseWindows => state.compositor().close_window(window_id),
-                MultiSelectAction::MoveToWorkspaceUp => state.compositor().move_window_to_workspace_up(window_id),
-                MultiSelectAction::MoveToWorkspaceDown => state.compositor().move_window_to_workspace_down(window_id),
-                MultiSelectAction::MoveToMonitorLeft => state.compositor().move_window_to_monitor_left(window_id),
-                MultiSelectAction::MoveToMonitorRight => state.compositor().move_window_to_monitor_right(window_id),
-                MultiSelectAction::MoveToMonitorUp => state.compositor().move_window_to_monitor_up(window_id),
-                MultiSelectAction::MoveToMonitorDown => state.compositor().move_window_to_monitor_down(window_id),
+                MultiSelectAction::MoveToWorkspaceUp => {
+                    state.compositor().move_window_to_workspace_up(window_id)
+                }
+                MultiSelectAction::MoveToWorkspaceDown => {
+                    state.compositor().move_window_to_workspace_down(window_id)
+                }
+                MultiSelectAction::MoveToMonitorLeft => {
+                    state.compositor().move_window_to_monitor_left(window_id)
+                }
+                MultiSelectAction::MoveToMonitorRight => {
+                    state.compositor().move_window_to_monitor_right(window_id)
+                }
+                MultiSelectAction::MoveToMonitorUp => {
+                    state.compositor().move_window_to_monitor_up(window_id)
+                }
+                MultiSelectAction::MoveToMonitorDown => {
+                    state.compositor().move_window_to_monitor_down(window_id)
+                }
                 MultiSelectAction::MoveColumnLeft => state.compositor().move_column_left(window_id),
-                MultiSelectAction::MoveColumnRight => state.compositor().move_column_right(window_id),
+                MultiSelectAction::MoveColumnRight => {
+                    state.compositor().move_column_right(window_id)
+                }
                 MultiSelectAction::ToggleFloating => state.compositor().toggle_floating(window_id),
-                MultiSelectAction::FullscreenWindows => state.compositor().fullscreen_window(window_id),
-                MultiSelectAction::MaximizeColumns => state.compositor().maximize_window_column(window_id),
+                MultiSelectAction::FullscreenWindows => {
+                    state.compositor().fullscreen_window(window_id)
+                }
+                MultiSelectAction::MaximizeColumns => {
+                    state.compositor().maximize_window_column(window_id)
+                }
                 MultiSelectAction::CenterColumns => state.compositor().center_column(window_id),
-                MultiSelectAction::ConsumeIntoColumn => state.compositor().consume_window_into_column(window_id),
-                MultiSelectAction::ToggleTabbedDisplay => state.compositor().toggle_column_tabbed_display(window_id),
+                MultiSelectAction::ConsumeIntoColumn => {
+                    state.compositor().consume_window_into_column(window_id)
+                }
+                MultiSelectAction::ToggleTabbedDisplay => {
+                    state.compositor().toggle_column_tabbed_display(window_id)
+                }
             };
             if let Err(e) = result {
                 tracing::warn!(%e, id = window_id, "multi-select action failed");

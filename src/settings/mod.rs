@@ -1,11 +1,10 @@
 mod click_actions;
 mod process_info;
 
-pub use click_actions::*;
-pub use process_info::*;
-
 use std::collections::HashMap;
 
+pub use click_actions::*;
+pub use process_info::*;
 use regex::Regex;
 use serde::{Deserialize, Deserializer};
 
@@ -201,18 +200,18 @@ where
 
 impl Settings {
     pub fn get_click_actions(&self, app_id: Option<&str>, title: Option<&str>) -> ClickActions {
-        if let (Some(id), Some(t)) = (app_id, title) {
-            if let Some(rules) = self.apps.get(id) {
-                for rule in rules {
-                    if rule.pattern.is_match(t) {
-                        if let Some(ref actions) = rule.click_actions {
-                            return actions.clone();
-                        }
-                    }
-                }
-            }
-        }
-        self.click_actions.clone()
+        app_id
+            .zip(title)
+            .and_then(|(id, t)| {
+                self.apps.get(id)?.iter().find_map(|rule| {
+                    rule.pattern
+                        .is_match(t)
+                        .then(|| rule.click_actions.as_ref())
+                        .flatten()
+                        .cloned()
+                })
+            })
+            .unwrap_or_else(|| self.click_actions.clone())
     }
 
     pub fn should_ignore(
@@ -221,34 +220,23 @@ impl Settings {
         title: Option<&str>,
         workspace_id: Option<u64>,
     ) -> bool {
-        for rule in &self.ignore_rules {
-            let app_match = rule
-                .app_id
+        self.ignore_rules.iter().any(|rule| {
+            rule.app_id
                 .as_ref()
-                .map_or(true, |id| app_id == Some(id.as_str()));
-            let title_match = rule
-                .title
-                .as_ref()
-                .map_or(true, |t| title == Some(t.as_str()));
-            let title_contains_match = rule.title_contains.as_ref().map_or(true, |contains| {
-                title.map_or(false, |t| t.contains(contains))
-            });
-            let title_regex_match = rule
-                .title_regex
-                .as_ref()
-                .map_or(true, |regex| title.map_or(false, |t| regex.is_match(t)));
-            let workspace_match = rule.workspace.map_or(true, |ws| workspace_id == Some(ws));
-
-            if app_match
-                && title_match
-                && title_contains_match
-                && title_regex_match
-                && workspace_match
-            {
-                return true;
-            }
-        }
-        false
+                .map_or(true, |id| app_id == Some(id.as_str()))
+                && rule
+                    .title
+                    .as_ref()
+                    .map_or(true, |t| title == Some(t.as_str()))
+                && rule.title_contains.as_ref().map_or(true, |contains| {
+                    title.map_or(false, |t| t.contains(contains))
+                })
+                && rule
+                    .title_regex
+                    .as_ref()
+                    .map_or(true, |regex| title.map_or(false, |t| regex.is_match(t)))
+                && rule.workspace.map_or(true, |ws| workspace_id == Some(ws))
+        })
     }
 
     pub fn notifications_enabled(&self) -> bool {
@@ -377,7 +365,9 @@ impl Settings {
 
     pub fn should_show_process_info(&self, app_id: Option<&str>) -> bool {
         self.process_info.enabled
-            && app_id.map_or(false, |id| self.process_info.title_patterns.contains_key(id))
+            && app_id.map_or(false, |id| {
+                self.process_info.title_patterns.contains_key(id)
+            })
     }
 
     pub fn process_info_pattern(&self, app_id: &str) -> Option<&Regex> {

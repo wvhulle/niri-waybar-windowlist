@@ -1,11 +1,12 @@
 use std::{cell::RefCell, collections::HashMap, mem, rc::Rc};
+
 use async_channel::Sender;
 use futures::Stream;
 use libpulse_binding::{
     callbacks::ListResult,
     context::{
-        Context, FlagSet, State,
         subscribe::{Facility, InterestMaskSet},
+        Context, FlagSet, State,
     },
     proplist::properties,
 };
@@ -108,16 +109,11 @@ fn on_context_ready(tx: Sender<AudioState>) {
 
 fn read_parent_pid(pid: u32) -> Option<u32> {
     let content = std::fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
-    for line in content.lines() {
-        if let Some(rest) = line.strip_prefix("PPid:") {
-            let ppid: u32 = rest.trim().parse().ok()?;
-            if ppid <= 1 {
-                return None;
-            }
-            return Some(ppid);
-        }
-    }
-    None
+    content.lines().find_map(|line| {
+        line.strip_prefix("PPid:")
+            .and_then(|rest| rest.trim().parse::<u32>().ok())
+            .filter(|&ppid| ppid > 1)
+    })
 }
 
 fn query_sink_inputs(tx: Sender<AudioState>) {
@@ -126,37 +122,36 @@ fn query_sink_inputs(tx: Sender<AudioState>) {
         if let Some(ctx) = ctx_ref.as_ref() {
             let introspector = ctx.introspect();
             let accumulator: Rc<RefCell<Vec<(u32, u32, bool)>>> = Rc::new(RefCell::new(Vec::new()));
-            let _ = introspector.get_sink_input_info_list(move |result| {
-                match result {
-                    ListResult::Item(info) => {
-                        if info.corked {
-                            return;
+            let _ = introspector.get_sink_input_info_list(move |result| match result {
+                ListResult::Item(info) => {
+                    if info.corked {
+                        return;
+                    }
+                    if let Some(pid_str) = info.proplist.get_str(properties::APPLICATION_PROCESS_ID)
+                    {
+                        if let Ok(pid) = pid_str.trim().parse::<u32>() {
+                            accumulator.borrow_mut().push((info.index, pid, info.mute));
                         }
-                        if let Some(pid_str) = info.proplist.get_str(properties::APPLICATION_PROCESS_ID) {
-                            if let Ok(pid) = pid_str.trim().parse::<u32>() {
-                                accumulator.borrow_mut().push((info.index, pid, info.mute));
+                    }
+                }
+                ListResult::End => {
+                    let items = mem::take(&mut *accumulator.borrow_mut());
+                    let mut state: AudioState = HashMap::new();
+                    for (index, pid, muted) in items {
+                        let sink_input = SinkInput { index, muted };
+                        let mut current = pid;
+                        loop {
+                            state.entry(current).or_default().push(sink_input.clone());
+                            match read_parent_pid(current) {
+                                Some(parent) => current = parent,
+                                None => break,
                             }
                         }
                     }
-                    ListResult::End => {
-                        let items = mem::take(&mut *accumulator.borrow_mut());
-                        let mut state: AudioState = HashMap::new();
-                        for (index, pid, muted) in items {
-                            let sink_input = SinkInput { index, muted };
-                            let mut current = pid;
-                            loop {
-                                state.entry(current).or_default().push(sink_input.clone());
-                                match read_parent_pid(current) {
-                                    Some(parent) => current = parent,
-                                    None => break,
-                                }
-                            }
-                        }
-                        let _ = tx.try_send(state);
-                    }
-                    ListResult::Error => {
-                        tracing::error!("error querying PulseAudio sink inputs");
-                    }
+                    let _ = tx.try_send(state);
+                }
+                ListResult::Error => {
+                    tracing::error!("error querying PulseAudio sink inputs");
                 }
             });
         }

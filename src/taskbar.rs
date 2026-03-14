@@ -1,16 +1,21 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
+
 use waybar_cffi::gtk::{
-    self as gtk,
-    gdk,
+    self as gtk, gdk,
     glib::translate::{IntoGlib, ToGlibPtr},
     prelude::AdjustmentExt,
     StateFlags,
 };
 
-pub fn set_background_color(widget: &impl gtk::prelude::IsA<gtk::Widget>, color: Option<&gdk::RGBA>) {
+pub fn set_background_color(
+    widget: &impl gtk::prelude::IsA<gtk::Widget>,
+    color: Option<&gdk::RGBA>,
+) {
     unsafe {
         gtk::ffi::gtk_widget_override_background_color(
-            gtk::prelude::Cast::upcast_ref::<gtk::Widget>(widget.as_ref()).to_glib_none().0,
+            gtk::prelude::Cast::upcast_ref::<gtk::Widget>(widget.as_ref())
+                .to_glib_none()
+                .0,
             StateFlags::NORMAL.into_glib(),
             color.map_or(std::ptr::null(), |c| c.to_glib_none().0),
         );

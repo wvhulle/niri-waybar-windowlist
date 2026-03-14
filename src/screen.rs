@@ -1,5 +1,5 @@
 use niri_ipc::{LogicalOutput, Output};
-use waybar_cffi::gtk::gdk::{Monitor, traits::MonitorExt};
+use waybar_cffi::gtk::gdk::{traits::MonitorExt, Monitor};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum DisplayFilter {

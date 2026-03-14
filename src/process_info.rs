@@ -4,7 +4,7 @@ use futures::AsyncReadExt;
 use procfs::process::Process;
 use thiserror::Error;
 use waybar_cffi::gtk::{
-    gio::{File, prelude::InputStreamExtManual, traits::FileExt},
+    gio::{prelude::InputStreamExtManual, traits::FileExt, File},
     glib::{self, Priority},
 };
 
@@ -34,9 +34,10 @@ impl ProcessInfo {
             .nth(3)
             .ok_or_else(|| ProcessError::MalformedStat { pid })?;
 
-        let ppid = ppid_str
-            .parse()
-            .map_err(|_| ProcessError::InvalidPpid { value: ppid_str.to_owned(), pid })?;
+        let ppid = ppid_str.parse().map_err(|_| ProcessError::InvalidPpid {
+            value: ppid_str.to_owned(),
+            pid,
+        })?;
 
         Ok(Self {
             parent_id: if ppid == 0 { None } else { Some(ppid) },
@@ -73,11 +74,13 @@ pub fn query_foreground(terminal_pid: u32) -> Result<ForegroundProcessInfo, Fore
     let fg_pid = find_foreground_pid(&shell_pids).unwrap_or(shell_pids[0]);
     let fg_process = Process::new(fg_pid)?;
 
-    let cwd = fg_process.cwd()
+    let cwd = fg_process
+        .cwd()
         .ok()
         .map(|p| p.to_string_lossy().into_owned());
 
-    let command = fg_process.cmdline()
+    let command = fg_process
+        .cmdline()
         .ok()
         .and_then(|args| args.into_iter().next())
         .map(|argv0| {
@@ -90,41 +93,36 @@ pub fn query_foreground(terminal_pid: u32) -> Result<ForegroundProcessInfo, Fore
 }
 
 fn find_foreground_pid(shell_pids: &[i32]) -> Option<i32> {
-    for &shell_pid in shell_pids {
-        let Ok(shell) = Process::new(shell_pid) else { continue };
-        let Ok(stat) = shell.stat() else { continue };
+    shell_pids.iter().find_map(|&shell_pid| {
+        let shell = Process::new(shell_pid).ok()?;
+        let stat = shell.stat().ok()?;
 
         if stat.tpgid == stat.pgrp {
-            return Some(shell_pid);
+            Some(shell_pid)
+        } else {
+            Some(find_process_in_group(shell_pid, stat.tpgid).unwrap_or(shell_pid))
         }
-
-        return find_process_in_group(shell_pid, stat.tpgid)
-            .or(Some(shell_pid));
-    }
-    None
+    })
 }
 
 fn find_process_in_group(pid: i32, target_pgrp: i32) -> Option<i32> {
     let proc = Process::new(pid).ok()?;
-    let children: Vec<u32> = proc.tasks().ok()?
+    let children: Vec<u32> = proc
+        .tasks()
+        .ok()?
         .filter_map(|t| t.ok())
         .flat_map(|task| task.children().unwrap_or_default())
         .collect();
 
-    for child_pid in children {
+    children.into_iter().find_map(|child_pid| {
         let child_pid = child_pid as i32;
-        if let Ok(child) = Process::new(child_pid) {
-            if let Ok(child_stat) = child.stat() {
-                if child_stat.pgrp == target_pgrp {
-                    return Some(child_pid);
-                }
-            }
-        }
-        if let Some(found) = find_process_in_group(child_pid, target_pgrp) {
-            return Some(found);
-        }
-    }
-    None
+        Process::new(child_pid)
+            .ok()
+            .and_then(|child| child.stat().ok())
+            .filter(|child_stat| child_stat.pgrp == target_pgrp)
+            .map(|_| child_pid)
+            .or_else(|| find_process_in_group(child_pid, target_pgrp))
+    })
 }
 
 #[derive(Error, Debug)]

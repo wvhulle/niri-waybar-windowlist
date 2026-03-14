@@ -1,13 +1,26 @@
-use std::{cell::{Cell, RefCell}, fmt::Debug, path::PathBuf, rc::Rc, time::Duration};
-use waybar_cffi::gtk::{
-    self as gtk, EventBox, IconLookupFlags, IconSize, IconTheme, Orientation,
-    gdk_pixbuf::Pixbuf,
-    gdk,
-    prelude::{BoxExt, Cast, ContainerExt, DragContextExtManual, EventBoxExt, GdkPixbufExt, IconThemeExt, LabelExt, WidgetExt, WidgetExtManual},
-    DestDefaults, TargetEntry, TargetFlags,
+use std::{
+    cell::{Cell, RefCell},
+    fmt::Debug,
+    path::PathBuf,
+    rc::Rc,
+    time::Duration,
 };
-use crate::taskbar::{set_background_color, SelectionState, FocusedWindow};
-use crate::SharedState;
+
+use waybar_cffi::gtk::{
+    self as gtk, gdk,
+    gdk_pixbuf::Pixbuf,
+    prelude::{
+        BoxExt, Cast, ContainerExt, DragContextExtManual, EventBoxExt, GdkPixbufExt, IconThemeExt,
+        LabelExt, WidgetExt, WidgetExtManual,
+    },
+    DestDefaults, EventBox, IconLookupFlags, IconSize, IconTheme, Orientation, TargetEntry,
+    TargetFlags,
+};
+
+use crate::{
+    taskbar::{set_background_color, FocusedWindow, SelectionState},
+    SharedState,
+};
 
 pub struct WindowButton {
     pub(crate) app_id: Option<String>,
@@ -46,7 +59,12 @@ thread_local! {
 
 impl WindowButton {
     #[tracing::instrument(level = "TRACE", fields(app_id = &window.app_id))]
-    pub fn create(state: &SharedState, window: &niri_ipc::Window, selection: SelectionState, focused_window: FocusedWindow) -> Self {
+    pub fn create(
+        state: &SharedState,
+        window: &niri_ipc::Window,
+        selection: SelectionState,
+        focused_window: FocusedWindow,
+    ) -> Self {
         let state_clone = state.clone();
         let display_titles = state.settings().show_window_titles();
 
@@ -90,12 +108,12 @@ impl WindowButton {
             gtk::glib::Propagation::Proceed
         });
         event_box.add_events(
-            gdk::EventMask::BUTTON_PRESS_MASK |
-            gdk::EventMask::BUTTON_RELEASE_MASK |
-            gdk::EventMask::SCROLL_MASK |
-            gdk::EventMask::SMOOTH_SCROLL_MASK |
-            gdk::EventMask::ENTER_NOTIFY_MASK |
-            gdk::EventMask::LEAVE_NOTIFY_MASK
+            gdk::EventMask::BUTTON_PRESS_MASK
+                | gdk::EventMask::BUTTON_RELEASE_MASK
+                | gdk::EventMask::SCROLL_MASK
+                | gdk::EventMask::SMOOTH_SCROLL_MASK
+                | gdk::EventMask::ENTER_NOTIFY_MASK
+                | gdk::EventMask::LEAVE_NOTIFY_MASK,
         );
 
         event_box.set_margin_start(0);
@@ -114,7 +132,9 @@ impl WindowButton {
 
         let app_id = window.app_id.clone();
         let process_info_enabled = state.settings().should_show_process_info(app_id.as_deref());
-        let icon_location = app_id.as_deref().and_then(|id| state_clone.icon_resolver().resolve(id));
+        let icon_location = app_id
+            .as_deref()
+            .and_then(|id| state_clone.icon_resolver().resolve(id));
 
         let audio_label = gtk::Label::new(None);
         audio_label.show();
@@ -281,9 +301,10 @@ impl WindowButton {
         });
 
         let window_id = self.window_id;
-        self.event_box.connect_drag_data_get(move |_, _, data, _, _| {
-            data.set_text(&window_id.to_string());
-        });
+        self.event_box
+            .connect_drag_data_get(move |_, _, data, _, _| {
+                data.set_text(&window_id.to_string());
+            });
 
         let button_for_end = self.event_box.clone();
         let skip_clicked_drag = self.skip_clicked.clone();
@@ -301,52 +322,59 @@ impl WindowButton {
         let state_for_motion = self.state.clone();
         let window_id_for_motion = self.window_id;
         let button_for_motion = self.event_box.clone();
-        self.event_box.connect_drag_motion(move |widget, ctx, _x, _y, _time| {
-            let is_external = ctx.drag_get_source_widget().is_none();
+        self.event_box
+            .connect_drag_motion(move |widget, ctx, _x, _y, _time| {
+                let is_external = ctx.drag_get_source_widget().is_none();
 
-            if is_external {
-                if state_for_motion.settings().drag_hover_focus() && timeout_for_motion.borrow().is_none() {
-                    let drag_over_bg = gdk::RGBA::new(0.5, 0.7, 1.0, 0.3);
-                    set_background_color(&button_for_motion, Some(&drag_over_bg));
+                if is_external {
+                    if state_for_motion.settings().drag_hover_focus()
+                        && timeout_for_motion.borrow().is_none()
+                    {
+                        let drag_over_bg = gdk::RGBA::new(0.5, 0.7, 1.0, 0.3);
+                        set_background_color(&button_for_motion, Some(&drag_over_bg));
 
-                    let state = state_for_motion.clone();
-                    let wid = window_id_for_motion;
-                    let delay = state_for_motion.settings().drag_hover_focus_delay();
-                    let timeout_ref = timeout_for_motion.clone();
+                        let state = state_for_motion.clone();
+                        let wid = window_id_for_motion;
+                        let delay = state_for_motion.settings().drag_hover_focus_delay();
+                        let timeout_ref = timeout_for_motion.clone();
 
-                    let source_id = gtk::glib::timeout_add_local_once(
-                        Duration::from_millis(delay as u64),
-                        move || {
-                            tracing::debug!("drag hover focus triggered for window {}", wid);
-                            if let Err(e) = state.compositor().focus_window(wid) {
-                                tracing::error!("failed to focus window on drag hover: {}", e);
-                            }
-                            timeout_ref.borrow_mut().take();
-                        }
-                    );
+                        let source_id = gtk::glib::timeout_add_local_once(
+                            Duration::from_millis(delay as u64),
+                            move || {
+                                tracing::debug!("drag hover focus triggered for window {}", wid);
+                                if let Err(e) = state.compositor().focus_window(wid) {
+                                    tracing::error!("failed to focus window on drag hover: {}", e);
+                                }
+                                timeout_ref.borrow_mut().take();
+                            },
+                        );
 
-                    *timeout_for_motion.borrow_mut() = Some(source_id);
+                        *timeout_for_motion.borrow_mut() = Some(source_id);
+                    }
+                    return true;
                 }
-                return true;
-            }
 
-            if let Some(source) = ctx.drag_get_source_widget() {
-                if source != *widget {
-                    if let Some(parent) = widget.parent() {
-                        if let Ok(container) = parent.downcast::<gtk::Box>() {
-                            let source_pos = container.child_position(&source);
-                            let target_pos = container.child_position(widget);
+                if let Some(source) = ctx.drag_get_source_widget() {
+                    if source != *widget {
+                        if let Some(parent) = widget.parent() {
+                            if let Ok(container) = parent.downcast::<gtk::Box>() {
+                                let source_pos = container.child_position(&source);
+                                let target_pos = container.child_position(widget);
 
-                            if source_pos != target_pos {
-                                container.reorder_child(&source, target_pos);
-                                tracing::trace!("reordered from {} to {}", source_pos, target_pos);
+                                if source_pos != target_pos {
+                                    container.reorder_child(&source, target_pos);
+                                    tracing::trace!(
+                                        "reordered from {} to {}",
+                                        source_pos,
+                                        target_pos
+                                    );
+                                }
                             }
                         }
                     }
                 }
-            }
-            true
-        });
+                true
+            });
 
         let button_for_leave = self.event_box.clone();
         self.event_box.connect_drag_leave(move |_, _, _| {
@@ -360,58 +388,72 @@ impl WindowButton {
         let state_for_drop = self.state.clone();
         let pos_for_drop = initial_position.clone();
         let settings_for_drop = self.state.settings().clone();
-        self.event_box.connect_drag_drop(move |widget, ctx, _x, _y, time| {
-            if let Some(timeout_id) = timeout_for_drop.borrow_mut().take() {
-                timeout_id.remove();
-            }
-
-            let is_internal = ctx.drag_get_source_widget().is_some();
-
-            if is_internal {
-                let target = widget.drag_dest_find_target(ctx, None);
-                if let Some(target) = target {
-                    widget.drag_get_data(ctx, &target, time);
-                    return true;
+        self.event_box
+            .connect_drag_drop(move |widget, ctx, _x, _y, time| {
+                if let Some(timeout_id) = timeout_for_drop.borrow_mut().take() {
+                    timeout_id.remove();
                 }
-            }
 
-            false
-        });
+                let is_internal = ctx.drag_get_source_widget().is_some();
+
+                if is_internal {
+                    let target = widget.drag_dest_find_target(ctx, None);
+                    if let Some(target) = target {
+                        widget.drag_get_data(ctx, &target, time);
+                        return true;
+                    }
+                }
+
+                false
+            });
 
         let state = state_for_drop;
-        self.event_box.connect_drag_data_received(move |_widget, ctx, _, _, data, _, time| {
-            tracing::info!("drop received");
+        self.event_box
+            .connect_drag_data_received(move |_widget, ctx, _, _, data, _, time| {
+                tracing::info!("drop received");
 
-            if let Some(text) = data.text() {
-                if let Ok(dragged_window_id) = text.parse::<u64>() {
-                    if let Some(source) = ctx.drag_get_source_widget() {
-                        if let Some(parent) = source.parent() {
-                            if let Ok(container) = parent.downcast::<gtk::Box>() {
-                                let start_pos = *pos_for_drop.borrow();
-                                let end_pos = container.child_position(&source);
-                                let delta = end_pos - start_pos;
+                if let Some(text) = data.text() {
+                    if let Ok(dragged_window_id) = text.parse::<u64>() {
+                        if let Some(source) = ctx.drag_get_source_widget() {
+                            if let Some(parent) = source.parent() {
+                                if let Ok(container) = parent.downcast::<gtk::Box>() {
+                                    let start_pos = *pos_for_drop.borrow();
+                                    let end_pos = container.child_position(&source);
+                                    let delta = end_pos - start_pos;
 
-                                let keep_stacked = Self::check_modifier_static(settings_for_drop.multi_select_modifier());
-                                tracing::info!("position change: {} -> {} (delta: {}, keep_stacked: {})", start_pos, end_pos, delta, keep_stacked);
+                                    let keep_stacked = Self::check_modifier_static(
+                                        settings_for_drop.multi_select_modifier(),
+                                    );
+                                    tracing::info!(
+                                        "position change: {} -> {} (delta: {}, keep_stacked: {})",
+                                        start_pos,
+                                        end_pos,
+                                        delta,
+                                        keep_stacked
+                                    );
 
-                                match state.compositor().reposition_window(dragged_window_id, delta, keep_stacked) {
-                                    Ok(()) => {
-                                        tracing::info!("reposition successful");
-                                        ctx.drag_finish(true, false, time);
-                                        return;
-                                    }
-                                    Err(e) => {
-                                        tracing::error!("reposition failed: {}", e);
+                                    match state.compositor().reposition_window(
+                                        dragged_window_id,
+                                        delta,
+                                        keep_stacked,
+                                    ) {
+                                        Ok(()) => {
+                                            tracing::info!("reposition successful");
+                                            ctx.drag_finish(true, false, time);
+                                            return;
+                                        }
+                                        Err(e) => {
+                                            tracing::error!("reposition failed: {}", e);
+                                        }
                                     }
                                 }
                             }
                         }
                     }
                 }
-            }
 
-            ctx.drag_finish(false, false, time);
-        });
+                ctx.drag_finish(false, false, time);
+            });
     }
 
     #[tracing::instrument(level = "TRACE")]
@@ -424,69 +466,79 @@ impl WindowButton {
         let show_titles = self.display_titles;
         let icon_dimension = self.state.settings().icon_size();
 
-        self.event_box.connect_size_allocate(move |button, allocation| {
-            let mut needs_render = container.children().is_empty();
+        self.event_box
+            .connect_size_allocate(move |button, allocation| {
+                let mut needs_render = container.children().is_empty();
 
-            if !needs_render {
-                if let Some(prev_alloc) = last_allocation.take() {
-                    if &prev_alloc != allocation {
+                if !needs_render {
+                    if let Some(prev_alloc) = last_allocation.take() {
+                        if &prev_alloc != allocation {
+                            needs_render = true;
+                        }
+                    } else {
                         needs_render = true;
                     }
-                } else {
-                    needs_render = true;
+
+                    last_allocation.replace(Some(*allocation));
                 }
 
-                last_allocation.replace(Some(*allocation));
-            }
+                if needs_render {
+                    let dimension = icon_dimension;
 
-            if needs_render {
-                let dimension = icon_dimension;
+                    let icon_image = Self::load_icon_image(icon_path.as_ref(), button, dimension)
+                        .unwrap_or_else(|| {
+                            static FALLBACK: &str = "application-x-executable";
 
-                let icon_image = Self::load_icon_image(icon_path.as_ref(), button, dimension)
-                    .unwrap_or_else(|| {
-                        static FALLBACK: &str = "application-x-executable";
+                            ICON_THEME_INSTANCE
+                                .with(|theme| {
+                                    theme.lookup_icon_for_scale(
+                                        FALLBACK,
+                                        dimension,
+                                        button.scale_factor(),
+                                        IconLookupFlags::empty(),
+                                    )
+                                })
+                                .and_then(|info| {
+                                    Self::load_icon_image(
+                                        info.filename().as_ref(),
+                                        button,
+                                        dimension,
+                                    )
+                                })
+                                .unwrap_or_else(|| {
+                                    gtk::Image::from_icon_name(Some(FALLBACK), IconSize::Button)
+                                })
+                        });
 
-                        ICON_THEME_INSTANCE.with(|theme| {
-                            theme.lookup_icon_for_scale(
-                                FALLBACK,
-                                dimension,
-                                button.scale_factor(),
-                                IconLookupFlags::empty(),
-                            )
-                        })
-                        .and_then(|info| Self::load_icon_image(info.filename().as_ref(), button, dimension))
-                        .unwrap_or_else(|| gtk::Image::from_icon_name(Some(FALLBACK), IconSize::Button))
+                    let container_copy = container.clone();
+                    let label_copy = label.clone();
+                    let audio_copy = audio_event_box.clone();
+                    let audio_inputs = audio_sink_inputs.clone();
+                    let button_copy = button.clone();
+                    gtk::glib::source::idle_add_local_once(move || {
+                        for child in container_copy.children() {
+                            container_copy.remove(&child);
+                        }
+
+                        container_copy.pack_start(&icon_image, false, false, 0);
+
+                        if show_titles {
+                            container_copy.pack_start(&label_copy, true, true, 0);
+                        }
+
+                        container_copy.pack_start(&audio_copy, false, false, 0);
+
+                        container_copy.show_all();
+                        button_copy.show_all();
+
+                        // Restore audio indicator visibility after re-packing,
+                        // since no_show_all prevents show_all() from showing it.
+                        if !audio_inputs.borrow().is_empty() {
+                            audio_copy.show();
+                        }
                     });
-
-                let container_copy = container.clone();
-                let label_copy = label.clone();
-                let audio_copy = audio_event_box.clone();
-                let audio_inputs = audio_sink_inputs.clone();
-                let button_copy = button.clone();
-                gtk::glib::source::idle_add_local_once(move || {
-                    for child in container_copy.children() {
-                        container_copy.remove(&child);
-                    }
-
-                    container_copy.pack_start(&icon_image, false, false, 0);
-
-                    if show_titles {
-                        container_copy.pack_start(&label_copy, true, true, 0);
-                    }
-
-                    container_copy.pack_start(&audio_copy, false, false, 0);
-
-                    container_copy.show_all();
-                    button_copy.show_all();
-
-                    // Restore audio indicator visibility after re-packing,
-                    // since no_show_all prevents show_all() from showing it.
-                    if !audio_inputs.borrow().is_empty() {
-                        audio_copy.show();
-                    }
-                });
-            }
-        });
+                }
+            });
     }
 
     fn load_icon_image(
@@ -496,13 +548,15 @@ impl WindowButton {
     ) -> Option<gtk::Image> {
         let scaled_size = size * widget.scale_factor();
 
-        path.and_then(|p| match Pixbuf::from_file_at_scale(p, scaled_size, scaled_size, true) {
-            Ok(pixbuf) => Some(pixbuf),
-            Err(e) => {
-                tracing::info!(%e, ?p, "icon load failed");
-                None
-            }
-        })
+        path.and_then(
+            |p| match Pixbuf::from_file_at_scale(p, scaled_size, scaled_size, true) {
+                Ok(pixbuf) => Some(pixbuf),
+                Err(e) => {
+                    tracing::info!(%e, ?p, "icon load failed");
+                    None
+                }
+            },
+        )
         .and_then(|pixbuf| pixbuf.create_surface(0, widget.window().as_ref()))
         .map(|surface| gtk::Image::from_surface(Some(&surface)))
     }
@@ -521,16 +575,14 @@ impl WindowButton {
             let btn_clone = btn.clone();
             let timeout_ref = tooltip_timeout.clone();
 
-            let source_id = gtk::glib::timeout_add_local_once(
-                Duration::from_millis(delay as u64),
-                move || {
+            let source_id =
+                gtk::glib::timeout_add_local_once(Duration::from_millis(delay as u64), move || {
                     if let Some(ref text) = *title_clone.borrow() {
                         btn_clone.set_tooltip_text(Some(text));
                         btn_clone.trigger_tooltip_query();
                     }
                     timeout_ref.borrow_mut().take();
-                }
-            );
+                });
 
             *tooltip_timeout.borrow_mut() = Some(source_id);
             gtk::glib::Propagation::Proceed

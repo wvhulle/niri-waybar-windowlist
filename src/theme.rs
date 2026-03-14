@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+
 use waybar_cffi::gtk::gdk;
 
 fn niri_config_path() -> PathBuf {
@@ -45,21 +46,25 @@ pub fn load_border_colors() -> BorderColors {
 }
 
 fn parse_border_colors(content: &str) -> BorderColors {
-    let doc: kdl::KdlDocument = content.parse()
+    let doc: kdl::KdlDocument = content
+        .parse()
         .unwrap_or_else(|e| panic!("failed to parse niri config: {e}"));
 
-    let border = doc.get("layout")
+    let border = doc
+        .get("layout")
         .and_then(|n| n.children())
         .and_then(|d| d.get("border"))
         .and_then(|n| n.children())
         .expect("niri config missing layout.border section");
 
-    let active = border.get("active-gradient")
+    let active = border
+        .get("active-gradient")
         .and_then(gradient_color)
         .and_then(parse_hex_color)
         .expect("niri config missing layout.border.active-gradient color");
 
-    let urgent = border.get("urgent-gradient")
+    let urgent = border
+        .get("urgent-gradient")
         .and_then(gradient_color)
         .and_then(parse_hex_color)
         .expect("niri config missing layout.border.urgent-gradient color");
@@ -103,8 +108,14 @@ layout {
     #[test]
     fn loads_real_config() {
         let colors = load_border_colors();
-        eprintln!("active=({},{},{}) urgent=({},{},{})",
-            colors.active.red(), colors.active.green(), colors.active.blue(),
-            colors.urgent.red(), colors.urgent.green(), colors.urgent.blue());
+        eprintln!(
+            "active=({},{},{}) urgent=({},{},{})",
+            colors.active.red(),
+            colors.active.green(),
+            colors.active.blue(),
+            colors.urgent.red(),
+            colors.urgent.green(),
+            colors.urgent.blue()
+        );
     }
 }

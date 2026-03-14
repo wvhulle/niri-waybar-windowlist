@@ -68,13 +68,17 @@ where
 {
     let raw: HashMap<String, String> = HashMap::deserialize(deserializer)?;
     raw.into_iter()
-        .map(|(k, v)| Regex::new(&v).map(|r| (k, r)).map_err(serde::de::Error::custom))
+        .map(|(k, v)| {
+            Regex::new(&v)
+                .map(|r| (k, r))
+                .map_err(serde::de::Error::custom)
+        })
         .collect()
 }
 
 fn default_title_patterns() -> HashMap<String, Regex> {
-    let pattern = Regex::new(r"^(?P<cwd>.+?)(?:\s-\s(?P<cmd>.+))?$")
-        .expect("default pattern is valid");
+    let pattern =
+        Regex::new(r"^(?P<cwd>.+?)(?:\s-\s(?P<cmd>.+))?$").expect("default pattern is valid");
     ["foot", "alacritty", "kitty", "wezterm"]
         .into_iter()
         .map(|id| (id.to_string(), pattern.clone()))
