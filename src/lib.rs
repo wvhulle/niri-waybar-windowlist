@@ -1,10 +1,12 @@
 use std::{
+    cell::Cell,
     collections::{BTreeMap, BTreeSet, HashMap},
     sync::{Arc, LazyLock, Mutex},
 };
 
 use futures::StreamExt;
 use settings::Settings;
+use thiserror::Error;
 use tracing_subscriber::{EnvFilter, fmt::format::FmtSpan};
 use waybar_cffi::{
     Module,
@@ -14,25 +16,120 @@ use waybar_cffi::{
 };
 
 mod audio;
+mod button;
+mod click_actions;
 mod compositor;
-mod errors;
-mod global;
+mod context_menu;
+mod event_stream;
 mod icons;
+mod indicator;
 mod notifications;
+mod process_info;
 mod screen;
 mod settings;
-mod system;
+mod taskbar;
 mod theme;
+mod title;
 mod wayland;
-mod widget;
 
 use audio::AudioState;
-use compositor::{WindowInfo, WindowSnapshot};
-use errors::ModuleError;
-use global::{EventMessage, SharedState};
+use compositor::{CompositorClient, WindowInfo, WindowSnapshot};
+use event_stream::EventMessage;
+use icons::IconResolver;
 use notifications::NotificationData;
-use system::ProcessInfo;
-use widget::{WindowButton, SelectionState, FocusedWindow, create_selection_state, create_focused_window, clear_selection};
+use process_info::ProcessInfo;
+use taskbar::{SelectionState, FocusedWindow, create_selection_state, create_focused_window, clear_selection};
+use theme::BorderColors;
+use wayland::WaylandActivator;
+use button::WindowButton;
+
+// ── Errors (inlined from errors.rs) ──
+
+#[derive(Error, Debug)]
+pub enum CompositorIpcError {
+    #[error("IPC error: {0}")]
+    Io(#[source] std::io::Error),
+
+    #[error("compositor returned error: {0}")]
+    Reply(String),
+
+    #[error("unexpected compositor response; expected {expected}: {actual:?}")]
+    UnexpectedResponse {
+        expected: &'static str,
+        actual: Box<niri_ipc::Response>,
+    },
+
+    #[error("event channel closed")]
+    EventChannelClosed,
+}
+
+impl CompositorIpcError {
+    pub fn unexpected_response(expected: &'static str, actual: niri_ipc::Response) -> Self {
+        Self::UnexpectedResponse {
+            expected,
+            actual: Box::new(actual),
+        }
+    }
+}
+
+// ── SharedState (moved from global.rs) ──
+
+#[derive(Debug, Clone)]
+pub(crate) struct SharedState(Arc<StateInner>);
+
+#[derive(Debug)]
+struct StateInner {
+    settings: Settings,
+    icon_resolver: IconResolver,
+    compositor: CompositorClient,
+    wayland_activator: Option<WaylandActivator>,
+}
+
+thread_local! {
+    static BORDER_COLORS: Cell<BorderColors> = Cell::new(crate::theme::load_border_colors());
+}
+
+impl SharedState {
+    fn create(settings: Settings) -> Self {
+        let colors = crate::theme::load_border_colors();
+        BORDER_COLORS.with(|cell| cell.set(colors));
+        let wayland_activator = WaylandActivator::connect();
+        Self(Arc::new(StateInner {
+            compositor: CompositorClient::create(settings.clone()),
+            icon_resolver: IconResolver::new(),
+            settings,
+            wayland_activator,
+        }))
+    }
+
+    pub fn settings(&self) -> &Settings {
+        &self.0.settings
+    }
+
+    pub fn icon_resolver(&self) -> &IconResolver {
+        &self.0.icon_resolver
+    }
+
+    pub fn compositor(&self) -> &CompositorClient {
+        &self.0.compositor
+    }
+
+    pub fn wayland_activator(&self) -> Option<&WaylandActivator> {
+        self.0.wayland_activator.as_ref()
+    }
+
+    pub fn border_colors(&self) -> BorderColors {
+        BORDER_COLORS.with(|cell| cell.get())
+    }
+
+    pub fn reload_border_colors(&self) {
+        let colors = crate::theme::load_border_colors();
+        BORDER_COLORS.with(|cell| cell.set(colors));
+        tracing::info!("border colors reloaded");
+    }
+}
+
+// ── Logging ──
 
 static LOGGING: LazyLock<()> = LazyLock::new(|| {
     let log_path = dirs::cache_dir()
@@ -66,14 +163,14 @@ static LOGGING: LazyLock<()> = LazyLock::new(|| {
     }
 });
 
-/// Handle to signal waybar that the module UI has changed and needs a redraw.
+// ── Waybar bridge ──
+
 #[derive(Clone)]
 struct WaybarUpdater {
     obj: *mut wbcffi_module,
     queue_update: unsafe extern "C" fn(*mut wbcffi_module),
 }
 
-// The wbcffi_module pointer is managed by waybar and lives for the module's lifetime.
 unsafe impl Send for WaybarUpdater {}
 unsafe impl Sync for WaybarUpdater {}
 
@@ -91,10 +188,7 @@ impl Module for WindowButtonsModule {
     fn init(info: &waybar_cffi::InitInfo, settings: Settings) -> Self {
         *LOGGING;
 
-        // Extract the raw queue_update callback from waybar's init_info.
-        // The Rust wrapper doesn't expose this, so we access the raw pointer.
         let raw_info = unsafe {
-            // InitInfo wraps a *const wbcffi_init_info as its first field
             let ptr: *const *const waybar_cffi::sys::wbcffi_init_info = std::ptr::from_ref(info).cast();
             &**ptr
         };
@@ -116,7 +210,7 @@ impl Module for WindowButtonsModule {
 
 waybar_module!(WindowButtonsModule);
 
-async fn initialize_module(info: &waybar_cffi::InitInfo, state: SharedState, updater: WaybarUpdater) -> Result<(), ModuleError> {
+async fn initialize_module(info: &waybar_cffi::InitInfo, state: SharedState, updater: WaybarUpdater) -> Result<(), CompositorIpcError> {
     let root = info.get_root_widget();
 
     let container = gtk::Box::new(Orientation::Horizontal, 0);
@@ -132,6 +226,8 @@ async fn initialize_module(info: &waybar_cffi::InitInfo, state: SharedState, upd
 
     Ok(())
 }
+
+// ── Module instance ──
 
 struct ModuleInstance {
     buttons: BTreeMap<u64, WindowButton>,
@@ -167,7 +263,7 @@ impl ModuleInstance {
     async fn run_event_loop(&mut self) {
         let display_filter = Arc::new(Mutex::new(self.determine_display_filter().await));
 
-        let mut event_stream = Box::pin(self.state.create_event_stream());
+        let mut event_stream = Box::pin(event_stream::create_event_stream(&self.state));
 
         while let Some(event) = event_stream.next().await {
             match event {
@@ -230,17 +326,17 @@ impl ModuleInstance {
         let gdk_window = self.container.window()?;
         let display = gdk_window.display();
         let monitor = display.monitor_at_window(&gdk_window)?;
-        
+
         let compositor = self.state.compositor().clone();
         let outputs = compositor.query_outputs().ok()?;
-        
+
         for (output_name, output_info) in outputs.into_iter() {
             let match_result = screen::OutputMatcher::compare(&monitor, &output_info);
             if match_result == screen::OutputMatcher::all() {
                 return Some(output_name);
             }
         }
-        
+
         None
     }
 
@@ -274,7 +370,7 @@ impl ModuleInstance {
 
         let display = gdk_window.display();
         let Some(monitor) = display.monitor_at_window(&gdk_window) else {
-            tracing::warn!(display = ?gdk_window.display(), geometry = ?gdk_window.geometry(), 
+            tracing::warn!(display = ?gdk_window.display(), geometry = ?gdk_window.geometry(),
                 "no monitor found for window");
             return screen::DisplayFilter::ShowAll;
         };
@@ -306,7 +402,7 @@ impl ModuleInstance {
                 if let Some(window) = process_map.lookup(process_id) {
                     if !window.is_focused {
                         if let Some(button) = self.buttons.get(&window.id) {
-                            tracing::trace!(?button, ?window, process_id, 
+                            tracing::trace!(?button, ?window, process_id,
                                 "marking window as urgent via PID match");
                             button.mark_urgent();
                             matched = true;
@@ -363,20 +459,20 @@ impl ModuleInstance {
 
             if app_identifier == mapped_entry {
                 if let Some(button) = self.buttons.get(&window.id) {
-                    tracing::trace!(app_identifier, ?button, ?window, 
+                    tracing::trace!(app_identifier, ?button, ?window,
                         "exact app ID match for notification");
                     button.mark_urgent();
                     exact_match = true;
                 }
             } else if fuzzy_enabled {
                 if app_identifier.to_lowercase() == entry_lower {
-                    tracing::trace!(app_identifier, ?window, 
+                    tracing::trace!(app_identifier, ?window,
                         "case-insensitive app ID match");
                     fuzzy_matches.push(window.id);
                 } else if app_identifier.contains('.') {
                     if let Some(suffix) = app_identifier.split('.').next_back() {
                         if suffix.to_lowercase() == entry_suffix {
-                            tracing::trace!(app_identifier, ?window, 
+                            tracing::trace!(app_identifier, ?window,
                                 "suffix-based app ID match");
                             fuzzy_matches.push(window.id);
                         }
@@ -501,7 +597,7 @@ impl ModuleInstance {
             .collect();
 
         for (wid, pid) in pids_to_query {
-            match system::query_foreground(pid) {
+            match process_info::query_foreground(pid) {
                 Ok(info) => {
                     if let Some(button) = self.buttons.get(&wid) {
                         button.update_process_info(info.cwd.as_deref(), info.command.as_deref());

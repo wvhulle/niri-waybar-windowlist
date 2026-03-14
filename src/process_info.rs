@@ -49,17 +49,13 @@ pub struct ForegroundProcessInfo {
     pub command: Option<String>,
 }
 
-pub fn query_foreground(terminal_pid: u32) -> Result<ForegroundProcessInfo, ProcessError> {
+pub fn query_foreground(terminal_pid: u32) -> Result<ForegroundProcessInfo, ForegroundError> {
     let pid = i32::try_from(terminal_pid)
-        .map_err(|_| ProcessError::InvalidPid { pid: terminal_pid })?;
-    let terminal = Process::new(pid)
-        .map_err(|e| ProcessError::Proc { reason: e.to_string() })?;
+        .map_err(|_| ForegroundError::InvalidPid { pid: terminal_pid })?;
+    let terminal = Process::new(pid)?;
 
-    // Find direct children that have a controlling terminal (tty_nr != 0).
-    // This filters out helper processes like kitty's "kitten __atexit__".
     let shell_pids: Vec<i32> = terminal
-        .tasks()
-        .map_err(|e| ProcessError::Proc { reason: e.to_string() })?
+        .tasks()?
         .filter_map(|t| t.ok())
         .flat_map(|task| task.children().unwrap_or_default())
         .filter_map(|child_pid| {
@@ -71,13 +67,11 @@ pub fn query_foreground(terminal_pid: u32) -> Result<ForegroundProcessInfo, Proc
         .collect();
 
     if shell_pids.is_empty() {
-        return Err(ProcessError::NoChildren { pid: terminal_pid });
+        return Err(ForegroundError::NoChildren { pid: terminal_pid });
     }
 
     let fg_pid = find_foreground_pid(&shell_pids).unwrap_or(shell_pids[0]);
-
-    let fg_process = Process::new(fg_pid)
-        .map_err(|e| ProcessError::Proc { reason: e.to_string() })?;
+    let fg_process = Process::new(fg_pid)?;
 
     let cwd = fg_process.cwd()
         .ok()
@@ -95,31 +89,21 @@ pub fn query_foreground(terminal_pid: u32) -> Result<ForegroundProcessInfo, Proc
     Ok(ForegroundProcessInfo { cwd, command })
 }
 
-/// Given shell PIDs, find the actual foreground process by checking tpgid.
-/// If the shell's tpgid differs from its own pgrp, something else (e.g. cargo,
-/// hx) is in the foreground — walk descendants to find it.
 fn find_foreground_pid(shell_pids: &[i32]) -> Option<i32> {
     for &shell_pid in shell_pids {
-        let shell = Process::new(shell_pid).ok()?;
-        let stat = shell.stat().ok()?;
+        let Ok(shell) = Process::new(shell_pid) else { continue };
+        let Ok(stat) = shell.stat() else { continue };
 
         if stat.tpgid == stat.pgrp {
-            // Shell itself is the foreground process
             return Some(shell_pid);
         }
 
-        // Foreground process group differs — search all descendants
-        if let Some(fg) = find_process_in_group(shell_pid, stat.tpgid) {
-            return Some(fg);
-        }
-
-        // Couldn't find it among descendants, return shell
-        return Some(shell_pid);
+        return find_process_in_group(shell_pid, stat.tpgid)
+            .or(Some(shell_pid));
     }
     None
 }
 
-/// Recursively search descendants of `pid` for a process whose pgrp matches `target_pgrp`.
 fn find_process_in_group(pid: i32, target_pgrp: i32) -> Option<i32> {
     let proc = Process::new(pid).ok()?;
     let children: Vec<u32> = proc.tasks().ok()?
@@ -136,7 +120,6 @@ fn find_process_in_group(pid: i32, target_pgrp: i32) -> Option<i32> {
                 }
             }
         }
-        // Recurse into grandchildren
         if let Some(found) = find_process_in_group(child_pid, target_pgrp) {
             return Some(found);
         }
@@ -165,9 +148,12 @@ pub enum ProcessError {
         e: futures::io::Error,
         pid: i64,
     },
+}
 
-    #[error("process error: {reason}")]
-    Proc { reason: String },
+#[derive(Error, Debug)]
+pub enum ForegroundError {
+    #[error(transparent)]
+    Proc(#[from] procfs::ProcError),
 
     #[error("invalid pid: {pid}")]
     InvalidPid { pid: u32 },

@@ -1,7 +1,7 @@
 use std::{collections::HashMap, ops::Deref};
 use async_channel::{Receiver, Sender};
 use niri_ipc::{Action, Event, Output, Reply, Request, Workspace, socket::Socket};
-use crate::{errors::ModuleError, settings::Settings};
+use crate::{CompositorIpcError, settings::Settings};
 
 #[derive(Debug, Clone)]
 pub struct CompositorClient {
@@ -14,243 +14,243 @@ impl CompositorClient {
     }
 
     #[tracing::instrument(level = "TRACE", err)]
-    pub fn focus_window(&self, window_id: u64) -> Result<(), ModuleError> {
+    pub fn focus_window(&self, window_id: u64) -> Result<(), CompositorIpcError> {
         let response = send_request(Request::Action(Action::FocusWindow { id: window_id }))?;
         validate_handled(response)
     }
 
     #[tracing::instrument(level = "TRACE", err)]
-    pub fn close_window(&self, window_id: u64) -> Result<(), ModuleError> {
+    pub fn close_window(&self, window_id: u64) -> Result<(), CompositorIpcError> {
         let response = send_request(Request::Action(Action::CloseWindow { id: Some(window_id) }))?;
         validate_handled(response)
     }
 
     #[tracing::instrument(level = "TRACE", err)]
-    pub fn maximize_window_column(&self, window_id: u64) -> Result<(), ModuleError> {
+    pub fn maximize_window_column(&self, window_id: u64) -> Result<(), CompositorIpcError> {
         self.focus_window(window_id)?;
         let response = send_request(Request::Action(Action::MaximizeColumn {}))?;
         validate_handled(response)
     }
 
 	#[tracing::instrument(level = "TRACE", err)]
-	pub fn maximize_window_to_edges(&self, window_id: u64) -> Result<(), ModuleError> {
+	pub fn maximize_window_to_edges(&self, window_id: u64) -> Result<(), CompositorIpcError> {
 		self.focus_window(window_id)?;
 		let response = send_request(Request::Action(Action::MaximizeWindowToEdges { id: Some(window_id) }))?;
 		validate_handled(response)
 	}
 
 	#[tracing::instrument(level = "TRACE", err)]
-	pub fn center_column(&self, window_id: u64) -> Result<(), ModuleError> {
+	pub fn center_column(&self, window_id: u64) -> Result<(), CompositorIpcError> {
 		self.focus_window(window_id)?;
 		let response = send_request(Request::Action(Action::CenterColumn {}))?;
 		validate_handled(response)
 	}
 
 	#[tracing::instrument(level = "TRACE", err)]
-	pub fn fullscreen_window(&self, window_id: u64) -> Result<(), ModuleError> {
+	pub fn fullscreen_window(&self, window_id: u64) -> Result<(), CompositorIpcError> {
 		let response = send_request(Request::Action(Action::FullscreenWindow { id: Some(window_id) }))?;
 		validate_handled(response)
 	}
 
     #[tracing::instrument(level = "TRACE", err)]
-    pub fn toggle_floating(&self, window_id: u64) -> Result<(), ModuleError> {
+    pub fn toggle_floating(&self, window_id: u64) -> Result<(), CompositorIpcError> {
         let response = send_request(Request::Action(Action::ToggleWindowFloating { id: Some(window_id) }))?;
         validate_handled(response)
     }
 
     #[tracing::instrument(level = "TRACE", err)]
-    pub fn center_window(&self, window_id: u64) -> Result<(), ModuleError> {
+    pub fn center_window(&self, window_id: u64) -> Result<(), CompositorIpcError> {
         let response = send_request(Request::Action(Action::CenterWindow { id: Some(window_id) }))?;
         validate_handled(response)
     }
 
     #[tracing::instrument(level = "TRACE", err)]
-    pub fn center_visible_columns(&self, window_id: u64) -> Result<(), ModuleError> {
+    pub fn center_visible_columns(&self, window_id: u64) -> Result<(), CompositorIpcError> {
         self.focus_window(window_id)?;
         let response = send_request(Request::Action(Action::CenterVisibleColumns {}))?;
         validate_handled(response)
     }
 
     #[tracing::instrument(level = "TRACE", err)]
-    pub fn expand_column_to_available_width(&self, window_id: u64) -> Result<(), ModuleError> {
+    pub fn expand_column_to_available_width(&self, window_id: u64) -> Result<(), CompositorIpcError> {
         self.focus_window(window_id)?;
         let response = send_request(Request::Action(Action::ExpandColumnToAvailableWidth {}))?;
         validate_handled(response)
     }
 
     #[tracing::instrument(level = "TRACE", err)]
-    pub fn toggle_windowed_fullscreen(&self, window_id: u64) -> Result<(), ModuleError> {
+    pub fn toggle_windowed_fullscreen(&self, window_id: u64) -> Result<(), CompositorIpcError> {
         let response = send_request(Request::Action(Action::ToggleWindowedFullscreen { id: Some(window_id) }))?;
         validate_handled(response)
     }
 
     #[tracing::instrument(level = "TRACE", err)]
-    pub fn consume_window_into_column(&self, window_id: u64) -> Result<(), ModuleError> {
+    pub fn consume_window_into_column(&self, window_id: u64) -> Result<(), CompositorIpcError> {
         self.focus_window(window_id)?;
         let response = send_request(Request::Action(Action::ConsumeWindowIntoColumn {}))?;
         validate_handled(response)
     }
 
     #[tracing::instrument(level = "TRACE", err)]
-    pub fn expel_window_from_column(&self, window_id: u64) -> Result<(), ModuleError> {
+    pub fn expel_window_from_column(&self, window_id: u64) -> Result<(), CompositorIpcError> {
         self.focus_window(window_id)?;
         let response = send_request(Request::Action(Action::ExpelWindowFromColumn {}))?;
         validate_handled(response)
     }
 
     #[tracing::instrument(level = "TRACE", err)]
-    pub fn reset_window_height(&self, window_id: u64) -> Result<(), ModuleError> {
+    pub fn reset_window_height(&self, window_id: u64) -> Result<(), CompositorIpcError> {
         self.focus_window(window_id)?;
         let response = send_request(Request::Action(Action::ResetWindowHeight { id: None }))?;
         validate_handled(response)
     }
 
     #[tracing::instrument(level = "TRACE", err)]
-    pub fn switch_preset_column_width(&self, window_id: u64) -> Result<(), ModuleError> {
+    pub fn switch_preset_column_width(&self, window_id: u64) -> Result<(), CompositorIpcError> {
         self.focus_window(window_id)?;
         let response = send_request(Request::Action(Action::SwitchPresetColumnWidth {}))?;
         validate_handled(response)
     }
 
     #[tracing::instrument(level = "TRACE", err)]
-    pub fn switch_preset_window_height(&self, window_id: u64) -> Result<(), ModuleError> {
+    pub fn switch_preset_window_height(&self, window_id: u64) -> Result<(), CompositorIpcError> {
         self.focus_window(window_id)?;
         let response = send_request(Request::Action(Action::SwitchPresetWindowHeight { id: None }))?;
         validate_handled(response)
     }
 
     #[tracing::instrument(level = "TRACE", err)]
-    pub fn move_window_to_workspace_down(&self, window_id: u64) -> Result<(), ModuleError> {
+    pub fn move_window_to_workspace_down(&self, window_id: u64) -> Result<(), CompositorIpcError> {
         self.focus_window(window_id)?;
         let response = send_request(Request::Action(Action::MoveWindowToWorkspaceDown { focus: false }))?;
         validate_handled(response)
     }
 
     #[tracing::instrument(level = "TRACE", err)]
-    pub fn move_window_to_workspace_up(&self, window_id: u64) -> Result<(), ModuleError> {
+    pub fn move_window_to_workspace_up(&self, window_id: u64) -> Result<(), CompositorIpcError> {
         self.focus_window(window_id)?;
         let response = send_request(Request::Action(Action::MoveWindowToWorkspaceUp { focus: false }))?;
         validate_handled(response)
     }
 
     #[tracing::instrument(level = "TRACE", err)]
-    pub fn move_window_to_monitor_left(&self, window_id: u64) -> Result<(), ModuleError> {
+    pub fn move_window_to_monitor_left(&self, window_id: u64) -> Result<(), CompositorIpcError> {
         self.focus_window(window_id)?;
         let response = send_request(Request::Action(Action::MoveWindowToMonitorLeft {}))?;
         validate_handled(response)
     }
 
     #[tracing::instrument(level = "TRACE", err)]
-    pub fn move_window_to_monitor_right(&self, window_id: u64) -> Result<(), ModuleError> {
+    pub fn move_window_to_monitor_right(&self, window_id: u64) -> Result<(), CompositorIpcError> {
         self.focus_window(window_id)?;
         let response = send_request(Request::Action(Action::MoveWindowToMonitorRight {}))?;
         validate_handled(response)
     }
 
     #[tracing::instrument(level = "TRACE", err)]
-    pub fn move_window_to_monitor_up(&self, window_id: u64) -> Result<(), ModuleError> {
+    pub fn move_window_to_monitor_up(&self, window_id: u64) -> Result<(), CompositorIpcError> {
         self.focus_window(window_id)?;
         let response = send_request(Request::Action(Action::MoveWindowToMonitorUp {}))?;
         validate_handled(response)
     }
 
     #[tracing::instrument(level = "TRACE", err)]
-    pub fn move_window_to_monitor_down(&self, window_id: u64) -> Result<(), ModuleError> {
+    pub fn move_window_to_monitor_down(&self, window_id: u64) -> Result<(), CompositorIpcError> {
         self.focus_window(window_id)?;
         let response = send_request(Request::Action(Action::MoveWindowToMonitorDown {}))?;
         validate_handled(response)
     }
 
     #[tracing::instrument(level = "TRACE", err)]
-    pub fn toggle_column_tabbed_display(&self, window_id: u64) -> Result<(), ModuleError> {
+    pub fn toggle_column_tabbed_display(&self, window_id: u64) -> Result<(), CompositorIpcError> {
         self.focus_window(window_id)?;
         let response = send_request(Request::Action(Action::ToggleColumnTabbedDisplay {}))?;
         validate_handled(response)
     }
 
     #[tracing::instrument(level = "TRACE", err)]
-    pub fn focus_workspace_previous(&self, window_id: u64) -> Result<(), ModuleError> {
+    pub fn focus_workspace_previous(&self, window_id: u64) -> Result<(), CompositorIpcError> {
         self.focus_window(window_id)?;
         let response = send_request(Request::Action(Action::FocusWorkspacePrevious {}))?;
         validate_handled(response)
     }
 
     #[tracing::instrument(level = "TRACE", err)]
-    pub fn move_column_left(&self, window_id: u64) -> Result<(), ModuleError> {
+    pub fn move_column_left(&self, window_id: u64) -> Result<(), CompositorIpcError> {
         self.focus_window(window_id)?;
         let response = send_request(Request::Action(Action::MoveColumnLeft {}))?;
         validate_handled(response)
     }
 
     #[tracing::instrument(level = "TRACE", err)]
-    pub fn move_column_right(&self, window_id: u64) -> Result<(), ModuleError> {
+    pub fn move_column_right(&self, window_id: u64) -> Result<(), CompositorIpcError> {
         self.focus_window(window_id)?;
         let response = send_request(Request::Action(Action::MoveColumnRight {}))?;
         validate_handled(response)
     }
 
     #[tracing::instrument(level = "TRACE", err)]
-    pub fn move_column_to_first(&self, window_id: u64) -> Result<(), ModuleError> {
+    pub fn move_column_to_first(&self, window_id: u64) -> Result<(), CompositorIpcError> {
         self.focus_window(window_id)?;
         let response = send_request(Request::Action(Action::MoveColumnToFirst {}))?;
         validate_handled(response)
     }
 
     #[tracing::instrument(level = "TRACE", err)]
-    pub fn move_column_to_last(&self, window_id: u64) -> Result<(), ModuleError> {
+    pub fn move_column_to_last(&self, window_id: u64) -> Result<(), CompositorIpcError> {
         self.focus_window(window_id)?;
         let response = send_request(Request::Action(Action::MoveColumnToLast {}))?;
         validate_handled(response)
     }
 
     #[tracing::instrument(level = "TRACE", err)]
-    pub fn move_window_down(&self, window_id: u64) -> Result<(), ModuleError> {
+    pub fn move_window_down(&self, window_id: u64) -> Result<(), CompositorIpcError> {
         self.focus_window(window_id)?;
         let response = send_request(Request::Action(Action::MoveWindowDown {}))?;
         validate_handled(response)
     }
 
     #[tracing::instrument(level = "TRACE", err)]
-    pub fn move_window_up(&self, window_id: u64) -> Result<(), ModuleError> {
+    pub fn move_window_up(&self, window_id: u64) -> Result<(), CompositorIpcError> {
         self.focus_window(window_id)?;
         let response = send_request(Request::Action(Action::MoveWindowUp {}))?;
         validate_handled(response)
     }
 
     #[tracing::instrument(level = "TRACE", err)]
-    pub fn move_window_down_or_to_workspace_down(&self, window_id: u64) -> Result<(), ModuleError> {
+    pub fn move_window_down_or_to_workspace_down(&self, window_id: u64) -> Result<(), CompositorIpcError> {
         self.focus_window(window_id)?;
         let response = send_request(Request::Action(Action::MoveWindowDownOrToWorkspaceDown {}))?;
         validate_handled(response)
     }
 
     #[tracing::instrument(level = "TRACE", err)]
-    pub fn move_window_up_or_to_workspace_up(&self, window_id: u64) -> Result<(), ModuleError> {
+    pub fn move_window_up_or_to_workspace_up(&self, window_id: u64) -> Result<(), CompositorIpcError> {
         self.focus_window(window_id)?;
         let response = send_request(Request::Action(Action::MoveWindowUpOrToWorkspaceUp {}))?;
         validate_handled(response)
     }
 
     #[tracing::instrument(level = "TRACE", err)]
-    pub fn move_column_left_or_to_monitor_left(&self, window_id: u64) -> Result<(), ModuleError> {
+    pub fn move_column_left_or_to_monitor_left(&self, window_id: u64) -> Result<(), CompositorIpcError> {
         self.focus_window(window_id)?;
         let response = send_request(Request::Action(Action::MoveColumnLeftOrToMonitorLeft {}))?;
         validate_handled(response)
     }
 
     #[tracing::instrument(level = "TRACE", err)]
-    pub fn move_column_right_or_to_monitor_right(&self, window_id: u64) -> Result<(), ModuleError> {
+    pub fn move_column_right_or_to_monitor_right(&self, window_id: u64) -> Result<(), CompositorIpcError> {
         self.focus_window(window_id)?;
         let response = send_request(Request::Action(Action::MoveColumnRightOrToMonitorRight {}))?;
         validate_handled(response)
     }
 
-    pub fn query_outputs(&self) -> Result<HashMap<String, Output>, ModuleError> {
+    pub fn query_outputs(&self) -> Result<HashMap<String, Output>, CompositorIpcError> {
         let response = send_request(Request::Outputs)?;
         match response {
             Ok(niri_ipc::Response::Outputs(outputs)) => Ok(outputs),
-            Ok(other) => Err(ModuleError::unexpected_response("Outputs", other)),
-            Err(msg) => Err(ModuleError::CompositorReply(msg)),
+            Ok(other) => Err(CompositorIpcError::unexpected_response("Outputs", other)),
+            Err(msg) => Err(CompositorIpcError::Reply(msg)),
         }
     }
 
@@ -259,7 +259,7 @@ impl CompositorClient {
     }
 
     #[tracing::instrument(level = "TRACE", err)]
-    pub fn reposition_window(&self, window_id: u64, position_delta: i32, keep_stacked: bool) -> Result<(), ModuleError> {
+    pub fn reposition_window(&self, window_id: u64, position_delta: i32, keep_stacked: bool) -> Result<(), CompositorIpcError> {
         if position_delta == 0 {
             return Ok(());
         }
@@ -269,8 +269,8 @@ impl CompositorClient {
         let response = send_request(Request::Windows)?;
         let all_windows: Vec<niri_ipc::Window> = match response {
             Ok(niri_ipc::Response::Windows(windows)) => windows,
-            Ok(other) => return Err(ModuleError::unexpected_response("Windows", other)),
-            Err(msg) => return Err(ModuleError::CompositorReply(msg)),
+            Ok(other) => return Err(CompositorIpcError::unexpected_response("Windows", other)),
+            Err(msg) => return Err(CompositorIpcError::Reply(msg)),
         };
 
         let currently_focused = all_windows.iter().find(|w| w.is_focused).map(|w| w.id);
@@ -297,8 +297,8 @@ impl CompositorClient {
             let response = send_request(Request::Windows)?;
             let windows: Vec<niri_ipc::Window> = match response {
                 Ok(niri_ipc::Response::Windows(w)) => w,
-                Ok(other) => return Err(ModuleError::unexpected_response("Windows", other)),
-                Err(msg) => return Err(ModuleError::CompositorReply(msg)),
+                Ok(other) => return Err(CompositorIpcError::unexpected_response("Windows", other)),
+                Err(msg) => return Err(CompositorIpcError::Reply(msg)),
             };
 
             windows
@@ -328,20 +328,20 @@ impl CompositorClient {
 }
 
 #[tracing::instrument(level = "TRACE", err)]
-fn send_request(request: Request) -> Result<Reply, ModuleError> {
-    connect_socket()?.send(request).map_err(ModuleError::CompositorIpc)
+fn send_request(request: Request) -> Result<Reply, CompositorIpcError> {
+    connect_socket()?.send(request).map_err(CompositorIpcError::Io)
 }
 
 #[tracing::instrument(level = "TRACE", err)]
-fn connect_socket() -> Result<Socket, ModuleError> {
-    Socket::connect().map_err(ModuleError::CompositorIpc)
+fn connect_socket() -> Result<Socket, CompositorIpcError> {
+    Socket::connect().map_err(CompositorIpcError::Io)
 }
 
-fn validate_handled(response: Reply) -> Result<(), ModuleError> {
+fn validate_handled(response: Reply) -> Result<(), CompositorIpcError> {
     match response {
         Ok(niri_ipc::Response::Handled) => Ok(()),
-        Ok(other) => Err(ModuleError::unexpected_response("Handled", other)),
-        Err(msg) => Err(ModuleError::CompositorReply(msg)),
+        Ok(other) => Err(CompositorIpcError::unexpected_response("Handled", other)),
+        Err(msg) => Err(CompositorIpcError::Reply(msg)),
     }
 }
 
@@ -374,14 +374,14 @@ impl NiriEventStream {
     }
 }
 
-fn run_event_stream(tx: Sender<CompositorEvent>, filter_workspace: bool) -> Result<(), ModuleError> {
+fn run_event_stream(tx: Sender<CompositorEvent>, filter_workspace: bool) -> Result<(), CompositorIpcError> {
     const MAX_BACKOFF_SECS: u64 = 30;
     let mut backoff_secs = 1u64;
     let mut window_state = WindowTracker::new();
 
     loop {
         match try_run_event_stream(&tx, &mut window_state, filter_workspace) {
-            Ok(()) | Err(ModuleError::EventChannelClosed) => {
+            Ok(()) | Err(CompositorIpcError::EventChannelClosed) => {
                 tracing::info!("niri event stream ended");
                 return Ok(());
             }
@@ -398,9 +398,9 @@ fn try_run_event_stream(
     tx: &Sender<CompositorEvent>,
     window_state: &mut WindowTracker,
     filter_workspace: bool,
-) -> Result<(), ModuleError> {
+) -> Result<(), CompositorIpcError> {
     let mut socket = connect_socket()?;
-    let response = socket.send(Request::EventStream).map_err(ModuleError::CompositorIpc)?;
+    let response = socket.send(Request::EventStream).map_err(CompositorIpcError::Io)?;
     validate_handled(response)?;
 
     tracing::info!("event stream connected");
@@ -415,24 +415,24 @@ fn try_run_event_stream(
                 let events = window_state.process_event(event, filter_workspace);
                 for compositor_event in events {
                     tx.send_blocking(compositor_event)
-                        .map_err(|_| ModuleError::EventChannelClosed)?;
+                        .map_err(|_| CompositorIpcError::EventChannelClosed)?;
                 }
 
                 if is_workspace_change {
                     tx.send_blocking(CompositorEvent::Workspaces)
-                        .map_err(|_| ModuleError::EventChannelClosed)?;
+                        .map_err(|_| CompositorIpcError::EventChannelClosed)?;
                 }
 
                 if is_config_reload {
                     tx.send_blocking(CompositorEvent::ConfigReloaded)
-                        .map_err(|_| ModuleError::EventChannelClosed)?;
+                        .map_err(|_| CompositorIpcError::EventChannelClosed)?;
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
                 tracing::debug!("skipping unknown niri event: {e}");
             }
             Err(e) => {
-                return Err(ModuleError::CompositorIpc(e));
+                return Err(CompositorIpcError::Io(e));
             }
         }
     }
