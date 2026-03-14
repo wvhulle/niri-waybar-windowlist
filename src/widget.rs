@@ -342,7 +342,7 @@ impl WindowButton {
 
 		self.gtk_button.connect_button_press_event(move |btn, event| {
 		    if event.button() == 1 {
-		        let modifier_held = Self::check_modifier(btn, state_press.settings().multi_select_modifier());
+		        let modifier_held = Self::check_modifier_from_event(event, state_press.settings().multi_select_modifier());
 		        if modifier_held {
 		            *skip_clicked_press.borrow_mut() = true;
 		            let mut sel = selection_press.borrow_mut();
@@ -708,37 +708,32 @@ impl WindowButton {
 		});
 	}
 
-	fn check_modifier(_button: &gtk::Button, modifier: ModifierKey) -> bool {
-		Self::check_modifier_static(modifier)
+	fn check_modifier_from_event(event: &gdk::EventButton, modifier: ModifierKey) -> bool {
+		let state = event.state();
+		match modifier {
+		    ModifierKey::Ctrl => state.contains(gdk::ModifierType::CONTROL_MASK),
+		    ModifierKey::Shift => state.contains(gdk::ModifierType::SHIFT_MASK),
+		    ModifierKey::Alt => state.contains(gdk::ModifierType::MOD1_MASK),
+		    ModifierKey::Super => state.contains(gdk::ModifierType::SUPER_MASK),
+		}
 	}
 
 	fn check_modifier_static(modifier: ModifierKey) -> bool {
-		use evdev::Key;
-
-		let keys_to_check: &[Key] = match modifier {
-		    ModifierKey::Ctrl => &[Key::KEY_LEFTCTRL, Key::KEY_RIGHTCTRL],
-		    ModifierKey::Shift => &[Key::KEY_LEFTSHIFT, Key::KEY_RIGHTSHIFT],
-		    ModifierKey::Alt => &[Key::KEY_LEFTALT, Key::KEY_RIGHTALT],
-		    ModifierKey::Super => &[Key::KEY_LEFTMETA, Key::KEY_RIGHTMETA],
+		let display = match gdk::Display::default() {
+		    Some(d) => d,
+		    None => return false,
 		};
-
-		let result = evdev::enumerate()
-		    .filter_map(|(_, device)| {
-		        if device.supported_keys().map_or(false, |keys| keys.contains(Key::KEY_LEFTCTRL)) {
-		            Some(device)
-		        } else {
-		            None
-		        }
-		    })
-		    .any(|device| {
-		        if let Ok(key_state) = device.get_key_state() {
-		            keys_to_check.iter().any(|&key| key_state.contains(key))
-		        } else {
-		            false
-		        }
-		    });
-
-		result
+		let keymap = match gdk::Keymap::for_display(&display) {
+		    Some(k) => k,
+		    None => return false,
+		};
+		let state = gdk::ModifierType::from_bits_truncate(keymap.modifier_state());
+		match modifier {
+		    ModifierKey::Ctrl => state.contains(gdk::ModifierType::CONTROL_MASK),
+		    ModifierKey::Shift => state.contains(gdk::ModifierType::SHIFT_MASK),
+		    ModifierKey::Alt => state.contains(gdk::ModifierType::MOD1_MASK),
+		    ModifierKey::Super => state.contains(gdk::ModifierType::SUPER_MASK),
+		}
 	}
 
 	fn display_multi_select_menu(&self) {
