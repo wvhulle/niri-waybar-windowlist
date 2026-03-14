@@ -1,13 +1,16 @@
+use std::cell::Cell;
 use std::sync::Arc;
 use async_channel::Sender;
 use futures::{Stream, StreamExt};
 use waybar_cffi::gtk::glib;
 use crate::{
     audio,
-    compositor::{CompositorClient, WindowSnapshot, WorkspaceEventStream},
+    compositor::{CompositorClient, CompositorEvent, NiriEventStream, WindowSnapshot},
     icons::IconResolver,
     notifications::{self, NotificationData},
     settings::Settings,
+    theme::BorderColors,
+    wayland::WaylandActivator,
 };
 
 #[derive(Debug, Clone)]
@@ -18,14 +21,23 @@ struct StateInner {
     settings: Settings,
     icon_resolver: IconResolver,
     compositor: CompositorClient,
+    wayland_activator: Option<WaylandActivator>,
+}
+
+thread_local! {
+    static BORDER_COLORS: Cell<BorderColors> = Cell::new(crate::theme::load_border_colors());
 }
 
 impl SharedState {
     pub fn create(settings: Settings) -> Self {
+        let colors = crate::theme::load_border_colors();
+        BORDER_COLORS.with(|cell| cell.set(colors));
+        let wayland_activator = WaylandActivator::connect();
         Self(Arc::new(StateInner {
             compositor: CompositorClient::create(settings.clone()),
             icon_resolver: IconResolver::new(),
             settings,
+            wayland_activator,
         }))
     }
 
@@ -41,6 +53,20 @@ impl SharedState {
         &self.0.compositor
     }
 
+    pub fn wayland_activator(&self) -> Option<&WaylandActivator> {
+        self.0.wayland_activator.as_ref()
+    }
+
+    pub fn border_colors(&self) -> BorderColors {
+        BORDER_COLORS.with(|cell| cell.get())
+    }
+
+    pub fn reload_border_colors(&self) {
+        let colors = crate::theme::load_border_colors();
+        BORDER_COLORS.with(|cell| cell.set(colors));
+        tracing::info!("border colors reloaded");
+    }
+
     pub fn create_event_stream(&self) -> impl Stream<Item = EventMessage> {
         let (tx, rx) = async_channel::unbounded();
 
@@ -52,8 +78,7 @@ impl SharedState {
             glib::spawn_future_local(forward_audio_updates(tx.clone()));
         }
 
-        glib::spawn_future_local(forward_window_updates(tx.clone(), self.compositor().create_window_stream()));
-        glib::spawn_future_local(forward_workspace_changes(tx, self.compositor().create_workspace_stream()));
+        glib::spawn_future_local(forward_compositor_events(tx, self.compositor().create_event_stream()));
 
         async_stream::stream! {
             while let Ok(event) = rx.recv().await {
@@ -65,9 +90,12 @@ impl SharedState {
 
 pub enum EventMessage {
     Notification(Box<NotificationData>),
-    WindowUpdate(WindowSnapshot),
+    FullSnapshot(WindowSnapshot),
+    FocusChanged { old: Option<u64>, new: Option<u64> },
+    WindowTitleChanged { id: u64, title: Option<String> },
     Workspaces(()),
     AudioUpdate(audio::AudioState),
+    ConfigReloaded,
 }
 
 async fn forward_audio_updates(tx: Sender<EventMessage>) {
@@ -88,18 +116,17 @@ async fn forward_notifications(tx: Sender<EventMessage>) {
     }
 }
 
-async fn forward_window_updates(tx: Sender<EventMessage>, stream: crate::compositor::WindowEventStream) {
-    while let Some(snapshot) = stream.next_snapshot().await {
-        if let Err(e) = tx.send(EventMessage::WindowUpdate(snapshot)).await {
-            tracing::error!(%e, "failed to forward window update");
-        }
-    }
-}
-
-async fn forward_workspace_changes(tx: Sender<EventMessage>, stream: WorkspaceEventStream) {
-    while stream.next_workspaces().await.is_some() {
-        if let Err(e) = tx.send(EventMessage::Workspaces(())).await {
-            tracing::error!(%e, "failed to forward workspace change");
+async fn forward_compositor_events(tx: Sender<EventMessage>, stream: NiriEventStream) {
+    while let Some(event) = stream.next().await {
+        let msg = match event {
+            CompositorEvent::FullSnapshot(snapshot) => EventMessage::FullSnapshot(snapshot),
+            CompositorEvent::FocusChanged { old, new } => EventMessage::FocusChanged { old, new },
+            CompositorEvent::WindowTitleChanged { id, title } => EventMessage::WindowTitleChanged { id, title },
+            CompositorEvent::Workspaces => EventMessage::Workspaces(()),
+            CompositorEvent::ConfigReloaded => EventMessage::ConfigReloaded,
+        };
+        if let Err(e) = tx.send(msg).await {
+            tracing::error!(%e, "failed to forward compositor event");
         }
     }
 }

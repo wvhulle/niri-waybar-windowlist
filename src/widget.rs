@@ -1,8 +1,9 @@
-use std::{cell::RefCell, collections::HashMap, fmt::Debug, path::PathBuf, process::Command, rc::Rc, time::{Duration, Instant}};
+use std::{cell::{Cell, RefCell}, collections::HashMap, fmt::Debug, path::PathBuf, process::Command, rc::Rc, time::{Duration, Instant}};
 use waybar_cffi::gtk::{
-    self as gtk, CssProvider, EventBox, IconLookupFlags, IconSize, IconTheme, Menu, MenuItem, Orientation, ReliefStyle,
+    self as gtk, EventBox, IconLookupFlags, IconSize, IconTheme, Menu, MenuItem, Orientation, ReliefStyle,
     gdk_pixbuf::Pixbuf,
-    prelude::{AdjustmentExt, BoxExt, ButtonExt, Cast, ContainerExt, CssProviderExt, DragContextExtManual, GdkPixbufExt, GtkMenuExt, GtkMenuItemExt, IconThemeExt, LabelExt, MenuShellExt, StyleContextExt, WidgetExt, WidgetExtManual},
+    gdk,
+    prelude::{AdjustmentExt, BoxExt, ButtonExt, Cast, ContainerExt, DragContextExtManual, GdkPixbufExt, GtkMenuExt, GtkMenuItemExt, IconThemeExt, LabelExt, MenuShellExt, StyleContextExt, WidgetExt, WidgetExtManual},
     DestDefaults, TargetEntry, TargetFlags,
 };
 use crate::audio::SinkInput;
@@ -22,6 +23,12 @@ pub fn clear_selection(selection: &SelectionState) {
     }
 }
 
+pub type FocusedWindow = Rc<Cell<Option<u64>>>;
+
+pub fn create_focused_window() -> FocusedWindow {
+    Rc::new(Cell::new(None))
+}
+
 pub struct WindowButton {
     app_id: Option<String>,
     gtk_button: gtk::Button,
@@ -35,8 +42,10 @@ pub struct WindowButton {
     window_id: u64,
     title: Rc<RefCell<Option<String>>>,
     selection: SelectionState,
+    focused_window: FocusedWindow,
     tooltip_timeout: Rc<RefCell<Option<gtk::glib::SourceId>>>,
     skip_clicked: Rc<RefCell<bool>>,
+    indicator_color: Rc<Cell<Option<gdk::RGBA>>>,
 }
 
 impl Debug for WindowButton {
@@ -50,14 +59,6 @@ impl Debug for WindowButton {
 }
 
 thread_local! {
-    static BUTTON_STYLES: CssProvider = {
-        let provider = CssProvider::new();
-        if let Err(e) = provider.load_from_data(include_bytes!("styles.css")) {
-            tracing::error!(%e, "failed to load CSS");
-        }
-        provider
-    };
-
     static ICON_THEME_INSTANCE: IconTheme = IconTheme::default().unwrap_or_default();
 
     static TASKBAR_ADJUSTMENT: std::cell::RefCell<Option<gtk::Adjustment>> = const { std::cell::RefCell::new(None) };
@@ -82,7 +83,7 @@ fn scroll_taskbar(delta: f64) {
 
 impl WindowButton {
     #[tracing::instrument(level = "TRACE", fields(app_id = &window.app_id))]
-    pub fn create(state: &SharedState, window: &niri_ipc::Window, selection: SelectionState) -> Self {
+    pub fn create(state: &SharedState, window: &niri_ipc::Window, selection: SelectionState, focused_window: FocusedWindow) -> Self {
         let state_clone = state.clone();
         let display_titles = state.settings().show_window_titles();
 
@@ -98,16 +99,35 @@ impl WindowButton {
         }
         title_label.set_xalign(0.0);
 
+        let indicator_color: Rc<Cell<Option<gdk::RGBA>>> = Rc::new(Cell::new(None));
+        let color_for_draw = indicator_color.clone();
+
         let gtk_button = gtk::Button::new();
         gtk_button.set_always_show_image(true);
         gtk_button.set_relief(ReliefStyle::None);
         gtk_button.add(&layout_box);
+
+        gtk_button.connect_draw(move |widget, cr| {
+            if let Some(rgba) = color_for_draw.get() {
+                let width = widget.allocation().width() as f64;
+                cr.set_source_rgba(rgba.red(), rgba.green(), rgba.blue(), rgba.alpha());
+                cr.rectangle(0.0, 0.0, width, 3.0);
+                cr.fill().ok();
+            }
+            gtk::glib::Propagation::Proceed
+        });
         gtk_button.add_events(
-            gtk::gdk::EventMask::SCROLL_MASK |
-            gtk::gdk::EventMask::SMOOTH_SCROLL_MASK |
-            gtk::gdk::EventMask::ENTER_NOTIFY_MASK |
-            gtk::gdk::EventMask::LEAVE_NOTIFY_MASK
+            gdk::EventMask::SCROLL_MASK |
+            gdk::EventMask::SMOOTH_SCROLL_MASK |
+            gdk::EventMask::ENTER_NOTIFY_MASK |
+            gdk::EventMask::LEAVE_NOTIFY_MASK
         );
+
+        // Set margins/padding programmatically instead of CSS
+        gtk_button.set_margin_start(0);
+        gtk_button.set_margin_end(0);
+        gtk_button.set_margin_top(0);
+        gtk_button.set_margin_bottom(0);
 
         let max_width = state.settings().max_button_width(None);
         gtk_button.set_size_request(max_width, -1);
@@ -118,10 +138,6 @@ impl WindowButton {
             title_label.set_max_width_chars(max_chars);
         }
 
-        BUTTON_STYLES.with(|provider| {
-            gtk_button.style_context().add_provider(provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
-        });
-
         let app_id = window.app_id.clone();
         let icon_location = app_id.as_deref().and_then(|id| state_clone.icon_resolver().resolve(id));
 
@@ -131,9 +147,6 @@ impl WindowButton {
         audio_event_box.add(&audio_label);
         audio_event_box.set_no_show_all(true);
         audio_event_box.style_context().add_class("audio-indicator");
-        BUTTON_STYLES.with(|provider| {
-            audio_event_box.style_context().add_provider(provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
-        });
 
         let audio_sink_inputs = Rc::new(RefCell::new(Vec::<(u32, bool)>::new()));
 
@@ -150,8 +163,10 @@ impl WindowButton {
             window_id: window.id,
             title: Rc::new(RefCell::new(window.title.clone())),
             selection,
+            focused_window,
             tooltip_timeout: Rc::new(RefCell::new(None)),
             skip_clicked: Rc::new(RefCell::new(false)),
+            indicator_color,
         };
 
         button.setup_click_handlers(window.id);
@@ -169,8 +184,11 @@ impl WindowButton {
         if is_focused {
             style_ctx.add_class("focused");
             style_ctx.remove_class("urgent");
+            let colors = self.state.border_colors();
+            self.indicator_color.set(Some(colors.active));
         } else {
             style_ctx.remove_class("focused");
+            self.indicator_color.set(None);
         }
         self.gtk_button.queue_draw();
     }
@@ -215,6 +233,9 @@ impl WindowButton {
     #[tracing::instrument(level = "TRACE")]
     pub fn mark_urgent(&self) {
         self.gtk_button.style_context().add_class("urgent");
+        let colors = self.state.border_colors();
+        self.indicator_color.set(Some(colors.urgent));
+        self.gtk_button.queue_draw();
     }
 
     pub fn get_widget(&self) -> &gtk::Button {
@@ -273,9 +294,11 @@ impl WindowButton {
 		let app_id = self.app_id.clone();
 		let title = self.title.clone();
 		let selection_left = self.selection.clone();
+		let focused_click = self.focused_window.clone();
+		let indicator_color_click = self.indicator_color.clone();
 
 		let title_clone = title.clone();
-		self.gtk_button.connect_clicked(move |_| {
+		self.gtk_button.connect_clicked(move |btn| {
 		    if *skip_clicked_click.borrow() {
 		        *skip_clicked_click.borrow_mut() = false;
 		        return;
@@ -303,6 +326,7 @@ impl WindowButton {
 		        }
 		    } else {
 		        clear_selection(&selection_left);
+		        Self::optimistic_focus(btn, window_id, &focused_click, &indicator_color_click, &state);
 		        Self::execute_click_action(&state, window_id, &actions.left_click_unfocused, app_id_ref, title_str);
 		    }
 		});
@@ -313,6 +337,8 @@ impl WindowButton {
 		let title_press = title.clone();
 		let selection_press = self.selection.clone();
 		let menu_self = self.clone_for_menu();
+		let focused_press = self.focused_window.clone();
+		let indicator_color_press = self.indicator_color.clone();
 
 		self.gtk_button.connect_button_press_event(move |btn, event| {
 		    if event.button() == 1 {
@@ -327,11 +353,12 @@ impl WindowButton {
 		                sel.insert(window_id, button_ref_press.clone());
 		                button_ref_press.style_context().add_class("selected");
 		            }
-		        } else if state_press.settings().left_click_focus_on_press() {
+		        } else {
 		            let is_currently_focused = button_ref_press.style_context().has_class("focused");
 		            if !is_currently_focused {
 		                *skip_clicked_press.borrow_mut() = true;
 		                clear_selection(&selection_press);
+		                Self::optimistic_focus(btn, window_id, &focused_press, &indicator_color_press, &state_press);
 		                let app_id_ref = app_id_press.as_deref();
 		                let title_ref = title_press.borrow();
 		                let title_str = title_ref.as_deref();
@@ -421,6 +448,36 @@ impl WindowButton {
 		});
 	}
 
+    fn optimistic_focus(
+        btn: &gtk::Button,
+        window_id: u64,
+        focused_window: &FocusedWindow,
+        indicator_color: &Rc<Cell<Option<gdk::RGBA>>>,
+        state: &SharedState,
+    ) {
+        // Find the previously focused button's widget via the container and unfocus it
+        if let Some(parent) = btn.parent() {
+            if let Ok(container) = parent.downcast::<gtk::Box>() {
+                for child in container.children() {
+                    if let Ok(child_btn) = child.downcast::<gtk::Button>() {
+                        if child_btn.style_context().has_class("focused") {
+                            child_btn.style_context().remove_class("focused");
+                            child_btn.queue_draw();
+                        }
+                    }
+                }
+            }
+        }
+
+        // Mark this button as focused
+        btn.style_context().add_class("focused");
+        btn.style_context().remove_class("urgent");
+        let colors = state.border_colors();
+        indicator_color.set(Some(colors.active));
+        btn.queue_draw();
+        focused_window.set(Some(window_id));
+    }
+
     fn execute_click_action(
         state: &SharedState,
         window_id: u64,
@@ -431,7 +488,7 @@ impl WindowButton {
         use crate::settings::ClickAction;
         match action {
             ClickAction::Action(window_action) => {
-                Self::execute_action(state, window_id, window_action);
+                Self::execute_action(state, window_id, window_action, app_id, title);
             }
             ClickAction::Command { command } => {
                 Self::execute_command(command, window_id, app_id, title);
@@ -439,13 +496,15 @@ impl WindowButton {
         }
     }
 
-    fn execute_action(state: &SharedState, window_id: u64, action: &crate::settings::WindowAction) {
+    fn execute_action(state: &SharedState, window_id: u64, action: &crate::settings::WindowAction, app_id: Option<&str>, title: Option<&str>) {
         use crate::settings::WindowAction;
         match action {
             WindowAction::None => {}
             WindowAction::FocusWindow => {
-                if let Err(e) = state.compositor().focus_window(window_id) {
-                    tracing::warn!(%e, id = window_id, "focus failed");
+                if let Some(activator) = state.wayland_activator() {
+                    activator.activate(app_id, title);
+                } else {
+                    tracing::warn!(id = window_id, "no Wayland activator available");
                 }
             }
             WindowAction::CloseWindow => {
@@ -627,7 +686,7 @@ impl WindowButton {
 		        if let Some(ref cmd) = command {
 		            Self::execute_command(cmd, window_id, app_id.as_deref(), title.as_deref());
 		        } else if let Some(ref act) = action {
-		            Self::execute_action(&state, window_id, act);
+		            Self::execute_action(&state, window_id, act, app_id.as_deref(), title.as_deref());
 		        }
 		    });
 		}
@@ -757,8 +816,10 @@ impl WindowButton {
 		    window_id: self.window_id,
 		    title: self.title.clone(),
 		    selection: self.selection.clone(),
+		    focused_window: self.focused_window.clone(),
 		    tooltip_timeout: self.tooltip_timeout.clone(),
 		    skip_clicked: self.skip_clicked.clone(),
+		    indicator_color: self.indicator_color.clone(),
 		}
 	}
 

@@ -4,11 +4,12 @@ use std::{
 };
 
 use futures::StreamExt;
-use settings::{Settings, ButtonAlignment};
+use settings::Settings;
 use tracing_subscriber::{EnvFilter, fmt::format::FmtSpan};
 use waybar_cffi::{
     Module,
-    gtk::{self, Orientation, ReliefStyle, ScrolledWindow, gio, glib::MainContext, traits::{AdjustmentExt, BoxExt, ButtonExt, ContainerExt, ScrolledWindowExt, StyleContextExt, WidgetExt}, gdk::EventMask, prelude::WidgetExtManual},
+    gtk::{self, Orientation, gio, glib::MainContext, traits::{BoxExt, ContainerExt, CssProviderExt, StyleContextExt, WidgetExt}},
+    sys::wbcffi_module,
     waybar_module,
 };
 
@@ -21,6 +22,8 @@ mod notifications;
 mod screen;
 mod settings;
 mod system;
+mod theme;
+mod wayland;
 mod widget;
 
 use audio::AudioState;
@@ -29,17 +32,56 @@ use errors::ModuleError;
 use global::{EventMessage, SharedState};
 use notifications::NotificationData;
 use system::ProcessInfo;
-use widget::{WindowButton, SelectionState, create_selection_state, clear_selection, set_taskbar_adjustment};
+use widget::{WindowButton, SelectionState, FocusedWindow, create_selection_state, create_focused_window, clear_selection};
 
 static LOGGING: LazyLock<()> = LazyLock::new(|| {
+    let log_path = dirs::cache_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
+        .join("window-list.log");
+
+    let log_file = match std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+    {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("failed to open log file {log_path:?}: {e}");
+            return;
+        }
+    };
+
     if let Err(e) = tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
+        .with_env_filter(
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| EnvFilter::new("niri_window_buttons=info"))
+        )
         .with_span_events(FmtSpan::CLOSE)
+        .with_timer(tracing_subscriber::fmt::time::uptime())
+        .with_writer(log_file)
+        .with_ansi(false)
         .try_init()
     {
         eprintln!("tracing subscriber initialization failed: {e}");
     }
 });
+
+/// Handle to signal waybar that the module UI has changed and needs a redraw.
+#[derive(Clone)]
+struct WaybarUpdater {
+    obj: *mut wbcffi_module,
+    queue_update: unsafe extern "C" fn(*mut wbcffi_module),
+}
+
+// The wbcffi_module pointer is managed by waybar and lives for the module's lifetime.
+unsafe impl Send for WaybarUpdater {}
+unsafe impl Sync for WaybarUpdater {}
+
+impl WaybarUpdater {
+    fn queue_update(&self) {
+        unsafe { (self.queue_update)(self.obj) };
+    }
+}
 
 struct WindowButtonsModule;
 
@@ -49,10 +91,22 @@ impl Module for WindowButtonsModule {
     fn init(info: &waybar_cffi::InitInfo, settings: Settings) -> Self {
         *LOGGING;
 
+        // Extract the raw queue_update callback from waybar's init_info.
+        // The Rust wrapper doesn't expose this, so we access the raw pointer.
+        let raw_info = unsafe {
+            // InitInfo wraps a *const wbcffi_init_info as its first field
+            let ptr: *const *const waybar_cffi::sys::wbcffi_init_info = std::ptr::from_ref(info).cast();
+            &**ptr
+        };
+        let updater = WaybarUpdater {
+            obj: raw_info.obj,
+            queue_update: raw_info.queue_update.expect("queue_update is not null"),
+        };
+
         let shared_state = SharedState::create(settings);
         let context = MainContext::default();
 
-        if let Err(e) = context.block_on(initialize_module(info, shared_state)) {
+        if let Err(e) = context.block_on(initialize_module(info, shared_state, updater)) {
             tracing::error!(%e, "module initialization failed");
         }
 
@@ -62,220 +116,63 @@ impl Module for WindowButtonsModule {
 
 waybar_module!(WindowButtonsModule);
 
-async fn initialize_module(info: &waybar_cffi::InitInfo, state: SharedState) -> Result<(), ModuleError> {
+async fn initialize_module(info: &waybar_cffi::InitInfo, state: SharedState, updater: WaybarUpdater) -> Result<(), ModuleError> {
     let root = info.get_root_widget();
 
-    let main_container = gtk::Box::new(Orientation::Horizontal, 0);
-
-    let left_arrow = gtk::Button::new();
-    left_arrow.set_label(state.settings().scroll_arrow_left());
-    left_arrow.set_relief(ReliefStyle::None);
-    left_arrow.style_context().add_class("scroll-arrow");
-    left_arrow.style_context().add_class("scroll-arrow-left");
-    left_arrow.set_sensitive(false);
-    left_arrow.set_no_show_all(true);
-    left_arrow.hide();
-    
-    let scrolled = ScrolledWindow::new(None::<&gtk::Adjustment>, None::<&gtk::Adjustment>);
-    scrolled.set_policy(gtk::PolicyType::External, gtk::PolicyType::Never);
-    scrolled.set_overlay_scrolling(false);
-    scrolled.set_propagate_natural_width(false);
-
-    let initial_max_width = state.settings().max_taskbar_width_for_output(None);
-    main_container.set_size_request(initial_max_width, -1);
-    main_container.set_hexpand(false);
-
-    let button_container = gtk::Box::new(Orientation::Horizontal, 0);
-    button_container.style_context().add_class("niri-window-buttons");
-    button_container.add_events(EventMask::SCROLL_MASK | EventMask::SMOOTH_SCROLL_MASK);
-
-    let alignment_spacer = gtk::Box::new(Orientation::Horizontal, 0);
-    alignment_spacer.set_size_request(0, 0);
-    button_container.add(&alignment_spacer);
-
-    scrolled.add(&button_container);
-
-    set_taskbar_adjustment(scrolled.hadjustment());
-
-    let scrolled_for_scroll = scrolled.clone();
-    button_container.connect_scroll_event(move |_, event| {
-        use waybar_cffi::gtk::gdk::ScrollDirection;
-
-        let hadj = scrolled_for_scroll.hadjustment();
-        let step = hadj.page_size() / 4.0;
-
-        match event.direction() {
-           ScrollDirection::Up | ScrollDirection::Left => {
-               hadj.set_value((hadj.value() - step).max(0.0));
-               gtk::glib::Propagation::Stop
-           }
-           ScrollDirection::Down | ScrollDirection::Right => {
-               let max = hadj.upper() - hadj.page_size();
-               hadj.set_value((hadj.value() + step).min(max));
-               gtk::glib::Propagation::Stop
-           }
-           ScrollDirection::Smooth => {
-               let (delta_x, delta_y) = event.delta();
-               let delta = if delta_x.abs() > delta_y.abs() { delta_x } else { delta_y };
-               let max = hadj.upper() - hadj.page_size();
-               let new_value = (hadj.value() + delta * step).clamp(0.0, max);
-               hadj.set_value(new_value);
-               gtk::glib::Propagation::Stop
-           }
-           _ => gtk::glib::Propagation::Proceed
+    // Remove rounded corners on button hover (GTK default theme adds border-radius)
+    let css_provider = gtk::CssProvider::new();
+    css_provider.load_from_data(b"
+        .niri-window-buttons button {
+            border-radius: 0;
         }
-    });
-    
-    let right_arrow = gtk::Button::new();
-    right_arrow.set_label(state.settings().scroll_arrow_right());
-    right_arrow.set_relief(ReliefStyle::None);
-    right_arrow.style_context().add_class("scroll-arrow");
-    right_arrow.style_context().add_class("scroll-arrow-right");
-    right_arrow.set_sensitive(false);
-    right_arrow.set_no_show_all(true);
-    right_arrow.hide();
-    
-    main_container.pack_start(&left_arrow, false, false, 0);
-    main_container.pack_start(&scrolled, true, true, 0);
-    main_container.pack_start(&right_arrow, false, false, 0);
-    
-    root.add(&main_container);
-   
-    let hadj = scrolled.hadjustment();
-    
-    let update_arrows = {
-        let hadj = hadj.clone();
-        let left_arrow = left_arrow.clone();
-        let right_arrow = right_arrow.clone();
-        
-        move || {
-            let value = hadj.value();
-            let upper = hadj.upper();
-            let page_size = hadj.page_size();
-            let has_overflow = upper > page_size + 0.5;
-            
-            if !has_overflow {
-                left_arrow.hide();
-                right_arrow.hide();
-            } else {
-                left_arrow.show();
-                right_arrow.show();
-                
-                let at_start = value < 0.5;
-                let max_scroll = upper - page_size;
-                let at_end = value >= max_scroll - 0.5;
-                
-                left_arrow.set_sensitive(!at_start);
-                right_arrow.set_sensitive(!at_end);
-            }
-        }
-    };
-    
-    let update_on_changed = update_arrows.clone();
-    hadj.connect_changed(move |_| {
-        let update = update_on_changed.clone();
-        gtk::glib::idle_add_local_once(move || {
-            update();
-        });
-    });
+    ").expect("failed to load CSS");
+    gtk::StyleContext::add_provider_for_screen(
+        &gtk::gdk::Screen::default().expect("no default screen"),
+        &css_provider,
+        gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+    );
 
-    let update_on_value = update_arrows.clone();
-    hadj.connect_value_changed(move |_| {
-        let update = update_on_value.clone();
-        gtk::glib::idle_add_local_once(move || {
-            update();
-        });
-    });
-    
-    let hadj_left = hadj.clone();
-    left_arrow.connect_clicked(move |_| {
-        let current = hadj_left.value();
-        let target = (current - hadj_left.page_size()).max(0.0);
-        smooth_scroll_to(&hadj_left, target);
-    });
-    
-    let hadj_right = hadj.clone();
-    right_arrow.connect_clicked(move |_| {
-        let current = hadj_right.value();
-        let max = hadj_right.upper() - hadj_right.page_size();
-        let target = (current + hadj_right.page_size()).min(max);
-        smooth_scroll_to(&hadj_right, target);
-    });
+    let container = gtk::Box::new(Orientation::Horizontal, 0);
+    container.style_context().add_class("niri-window-buttons");
+
+    root.add(&container);
 
     let context = MainContext::default();
-    let main_container_clone = main_container.clone();
     context.spawn_local(async move {
-        ModuleInstance::create(state, button_container, scrolled, main_container_clone, alignment_spacer).run_event_loop().await
+        ModuleInstance::create(state, container, updater).run_event_loop().await
     });
 
     Ok(())
 }
 
-fn smooth_scroll_to(adjustment: &gtk::Adjustment, target: f64) {
-    let start = adjustment.value();
-    let distance = target - start;
-    
-    if distance.abs() < 0.1 {
-        adjustment.set_value(target);
-        return;
-    }
-    
-    let duration = 150.0;
-    let start_time = std::time::Instant::now();
-    let adj = adjustment.clone();
-    
-    gtk::glib::timeout_add_local(std::time::Duration::from_millis(16), move || {
-        let elapsed = start_time.elapsed().as_millis() as f64;
-        let progress = (elapsed / duration).min(1.0);
-        
-        let eased = ease_out_cubic(progress);
-        let new_value = start + (distance * eased);
-        
-        adj.set_value(new_value);
-        
-        if progress >= 1.0 {
-            gtk::glib::ControlFlow::Break
-        } else {
-            gtk::glib::ControlFlow::Continue
-        }
-    });
-}
-
-fn ease_out_cubic(t: f64) -> f64 {
-    let t = t - 1.0;
-    t * t * t + 1.0
-}
-
 struct ModuleInstance {
     buttons: BTreeMap<u64, WindowButton>,
     container: gtk::Box,
-    scrolled_window: ScrolledWindow,
-    main_container: gtk::Box,
-    alignment_spacer: gtk::Box,
     previous_snapshot: Option<WindowSnapshot>,
     current_output: Option<String>,
     previous_focused: Option<u64>,
     state: SharedState,
     selection: SelectionState,
+    focused_window: FocusedWindow,
     audio_state: AudioState,
     window_pids: HashMap<u64, u32>,
+    updater: WaybarUpdater,
 }
 
 impl ModuleInstance {
-    fn create(state: SharedState, container: gtk::Box, scrolled_window: ScrolledWindow, main_container: gtk::Box, alignment_spacer: gtk::Box) -> Self {
+    fn create(state: SharedState, container: gtk::Box, updater: WaybarUpdater) -> Self {
         Self {
             buttons: BTreeMap::new(),
             container,
-            scrolled_window,
-            main_container,
-            alignment_spacer,
             previous_snapshot: None,
             current_output: None,
             previous_focused: None,
             state,
             selection: create_selection_state(),
+            focused_window: create_focused_window(),
             audio_state: AudioState::new(),
             window_pids: HashMap::new(),
+            updater,
         }
     }
 
@@ -288,8 +185,21 @@ impl ModuleInstance {
             match event {
                 EventMessage::Notification(notif) => self.handle_notification(notif).await,
                 EventMessage::AudioUpdate(state) => self.handle_audio_update(state),
-                EventMessage::WindowUpdate(snapshot) => {
+                EventMessage::FullSnapshot(snapshot) => {
                     self.handle_window_update(snapshot, display_filter.clone()).await
+                }
+                EventMessage::FocusChanged { old, new } => {
+                    self.handle_focus_change(old, new);
+                }
+                EventMessage::WindowTitleChanged { id, title } => {
+                    self.handle_window_title_update(id, title.as_deref());
+                }
+                EventMessage::ConfigReloaded => {
+                    tracing::info!("config reloaded, refreshing border colors");
+                    self.state.reload_border_colors();
+                    for button in self.buttons.values() {
+                        button.get_widget().queue_draw();
+                    }
                 }
                 EventMessage::Workspaces(_) => {
                     let updated_filter = self.determine_display_filter().await;
@@ -318,11 +228,7 @@ impl ModuleInstance {
         let new_output = self.get_current_output_name();
 
         if self.current_output.as_deref() != new_output.as_deref() {
-            self.current_output = new_output.clone();
-
-            let max_width = self.state.settings().max_taskbar_width_for_output(new_output.as_deref());
-            self.main_container.set_size_request(max_width, -1);
-
+            self.current_output = new_output;
             return true;
         }
 
@@ -513,7 +419,6 @@ impl ModuleInstance {
 
         let mut removed_windows = self.buttons.keys().copied().collect::<BTreeSet<_>>();
         let config = self.state.settings();
-        let mut new_button_added = false;
 
         for window in snapshot.iter().filter(|w| {
             let should_display = filter.lock()
@@ -529,54 +434,18 @@ impl ModuleInstance {
             }
             true
         }) {
-            let button_count = (self.buttons.len() + 1) as i32;
-            let output = self.current_output.as_deref();
-            let min_width = self.state.settings().min_button_width(output);
-            let max_width = self.state.settings().max_button_width(output);
-            let total_limit = self.state.settings().max_taskbar_width_for_output(output);
-            
-            let initial_width = if max_width * button_count > total_limit {
-                (total_limit / button_count).max(min_width).max(1)
-            } else {
-                max_width
-            }.max(1);
-
             if let Some(pid) = window.pid {
                 self.window_pids.insert(window.id, pid as u32);
             }
 
             let button = self.buttons.entry(window.id).or_insert_with(|| {
-                new_button_added = true;
-                let btn = WindowButton::create(&self.state, window, self.selection.clone());
-                btn.get_widget().set_size_request(initial_width, -1);
-                self.container.add(btn.get_widget());
+                let btn = WindowButton::create(&self.state, window, self.selection.clone(), self.focused_window.clone());
+                self.container.pack_start(btn.get_widget(), false, false, 0);
                 btn
             });
 
             button.update_focus(window.is_focused);
             button.update_title(window.title.as_deref());
-            
-            if window.is_focused {
-                let button_widget = button.get_widget().clone();
-                let scrolled = self.scrolled_window.clone();
-                gtk::glib::idle_add_local_once(move || {
-                    let allocation = button_widget.allocation();
-                    let hadj = scrolled.hadjustment();
-                    let button_x = allocation.x() as f64;
-                    let button_width = allocation.width() as f64;
-                    let current_scroll = hadj.value();
-                    let page_size = hadj.page_size();
-                    
-                    let button_right = button_x + button_width;
-                    let visible_right = current_scroll + page_size;
-                    
-                    if button_x < current_scroll {
-                       hadj.set_value(button_x);
-                    } else if button_right > visible_right {
-                       hadj.set_value(button_right - page_size);
-                    }
-                });
-            }
 
             removed_windows.remove(&window.id);
             self.container.reorder_child(button.get_widget(), -1);
@@ -590,50 +459,43 @@ impl ModuleInstance {
             self.window_pids.remove(&window_id);
         }
 
-        if !self.buttons.is_empty() {
-            let button_count = self.buttons.len() as i32;
-            let output = self.current_output.as_deref();
-            let min_width = self.state.settings().min_button_width(output);
-            let max_width = self.state.settings().max_button_width(output);
-            let total_limit = self.state.settings().max_taskbar_width_for_output(output);
-
-            let final_width = if max_width * button_count > total_limit {
-                (total_limit / button_count).max(min_width).max(1)
-            } else {
-                max_width
-            }.max(1);
-
-            for button in self.buttons.values() {
-                button.get_widget().set_size_request(final_width, -1);
-                button.resize_for_width(final_width);
-            }
-
-            let total_buttons_width = final_width * button_count;
-            let page_size = self.scrolled_window.hadjustment().page_size() as i32;
-            let available_width = if page_size > 0 { page_size } else { total_limit };
-            let spacer_width = match self.state.settings().button_alignment() {
-                ButtonAlignment::Left => 0,
-                ButtonAlignment::Center => ((available_width - total_buttons_width) / 2).max(0),
-                ButtonAlignment::Right => (available_width - total_buttons_width).max(0),
-            };
-            self.alignment_spacer.set_size_request(spacer_width, 0);
-            self.container.reorder_child(&self.alignment_spacer, 0);
-        } else {
-            self.alignment_spacer.set_size_request(0, 0);
-        }
-
         self.container.show_all();
-
-        if new_button_added {
-            let scrolled = self.scrolled_window.clone();
-            gtk::glib::timeout_add_local_once(std::time::Duration::from_millis(50), move || {
-                let hadj = scrolled.hadjustment();
-                hadj.set_value(hadj.upper() - hadj.page_size());
-            });
-        }
-
+        self.updater.queue_update();
         self.previous_snapshot = Some(snapshot);
         self.update_button_audio_states();
+    }
+
+    #[tracing::instrument(level = "INFO", skip(self))]
+    fn handle_focus_change(&mut self, old: Option<u64>, new: Option<u64>) {
+        if old == new {
+            return;
+        }
+
+        clear_selection(&self.selection);
+
+        if let Some(old_id) = old {
+            if let Some(button) = self.buttons.get(&old_id) {
+                button.update_focus(false);
+            }
+        }
+
+        if let Some(new_id) = new {
+            if let Some(button) = self.buttons.get(&new_id) {
+                button.update_focus(true);
+            }
+        }
+
+        self.previous_focused = new;
+        self.updater.queue_update();
+        self.update_button_audio_states();
+    }
+
+    #[tracing::instrument(level = "INFO", skip(self))]
+    fn handle_window_title_update(&mut self, id: u64, title: Option<&str>) {
+        if let Some(button) = self.buttons.get(&id) {
+            button.update_title(title);
+            self.updater.queue_update();
+        }
     }
 
     fn handle_audio_update(&mut self, state: AudioState) {

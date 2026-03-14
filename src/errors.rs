@@ -14,8 +14,8 @@ pub enum ModuleError {
         actual: Box<niri_ipc::Response>,
     },
 
-    #[error("window snapshot channel closed")]
-    SnapshotChannelClosed,
+    #[error("event channel closed")]
+    EventChannelClosed,
 }
 
 impl ModuleError {

@@ -254,12 +254,8 @@ impl CompositorClient {
         }
     }
 
-    pub fn create_window_stream(&self) -> WindowEventStream {
-        WindowEventStream::start(self.settings.only_current_workspace())
-    }
-
-    pub fn create_workspace_stream(&self) -> WorkspaceEventStream {
-        WorkspaceEventStream::start()
+    pub fn create_event_stream(&self) -> NiriEventStream {
+        NiriEventStream::start(self.settings.only_current_workspace())
     }
 
     #[tracing::instrument(level = "TRACE", err)]
@@ -349,101 +345,48 @@ fn validate_handled(response: Reply) -> Result<(), ModuleError> {
     }
 }
 
-pub struct WindowEventStream {
-    receiver: Receiver<WindowSnapshot>,
+pub enum CompositorEvent {
+    FullSnapshot(WindowSnapshot),
+    FocusChanged { old: Option<u64>, new: Option<u64> },
+    WindowTitleChanged { id: u64, title: Option<String> },
+    Workspaces,
+    ConfigReloaded,
 }
 
-impl WindowEventStream {
+pub struct NiriEventStream {
+    receiver: Receiver<CompositorEvent>,
+}
+
+impl NiriEventStream {
     fn start(filter_workspace: bool) -> Self {
         let (tx, rx) = async_channel::unbounded();
         std::thread::spawn(move || {
-            if let Err(e) = run_window_stream(tx, filter_workspace) {
-                tracing::error!(%e, "window event stream terminated");
+            if let Err(e) = run_event_stream(tx, filter_workspace) {
+                tracing::error!(%e, "niri event stream terminated");
             }
         });
 
         Self { receiver: rx }
     }
 
-    pub async fn next_snapshot(&self) -> Option<WindowSnapshot> {
+    pub async fn next(&self) -> Option<CompositorEvent> {
         self.receiver.recv().await.ok()
     }
 }
 
-pub struct WorkspaceEventStream {
-    receiver: Receiver<Vec<Workspace>>,
-}
-
-impl WorkspaceEventStream {
-    fn start() -> Self {
-        let (tx, rx) = async_channel::unbounded();
-        std::thread::spawn(move || {
-            if let Err(e) = run_workspace_stream(tx) {
-                tracing::error!(%e, "workspace event stream terminated");
-            }
-        });
-
-        Self { receiver: rx }
-    }
-
-    pub async fn next_workspaces(&self) -> Option<Vec<Workspace>> {
-        self.receiver.recv().await.ok()
-    }
-}
-
-fn run_workspace_stream(tx: Sender<Vec<Workspace>>) -> Result<(), ModuleError> {
-    const MAX_BACKOFF_SECS: u64 = 30;
-    let mut backoff_secs = 1u64;
-
-    loop {
-        match try_run_workspace_stream(&tx) {
-            Ok(()) | Err(ModuleError::SnapshotChannelClosed) => {
-                tracing::info!("workspace event stream ended");
-                return Ok(());
-            }
-            Err(e) => {
-                tracing::warn!(%e, backoff_secs, "workspace event stream error, reconnecting");
-                std::thread::sleep(std::time::Duration::from_secs(backoff_secs));
-                backoff_secs = (backoff_secs * 2).min(MAX_BACKOFF_SECS);
-            }
-        }
-    }
-}
-
-fn try_run_workspace_stream(tx: &Sender<Vec<Workspace>>) -> Result<(), ModuleError> {
-    let mut socket = connect_socket()?;
-    let response = socket.send(Request::EventStream).map_err(ModuleError::CompositorIpc)?;
-    validate_handled(response)?;
-
-    tracing::info!("workspace event stream connected");
-    let mut event_reader = socket.read_events();
-
-    loop {
-        match event_reader() {
-            Ok(Event::WorkspacesChanged { workspaces }) => {
-                tx.send_blocking(workspaces).map_err(|_| ModuleError::SnapshotChannelClosed)?;
-            }
-            Ok(_) => {}
-            Err(e) => {
-                return Err(ModuleError::CompositorIpc(e));
-            }
-        }
-    }
-}
-
-fn run_window_stream(tx: Sender<WindowSnapshot>, filter_workspace: bool) -> Result<(), ModuleError> {
+fn run_event_stream(tx: Sender<CompositorEvent>, filter_workspace: bool) -> Result<(), ModuleError> {
     const MAX_BACKOFF_SECS: u64 = 30;
     let mut backoff_secs = 1u64;
     let mut window_state = WindowTracker::new();
 
     loop {
-        match try_run_window_stream(&tx, &mut window_state, filter_workspace) {
-            Ok(()) | Err(ModuleError::SnapshotChannelClosed) => {
-                tracing::info!("window event stream ended");
+        match try_run_event_stream(&tx, &mut window_state, filter_workspace) {
+            Ok(()) | Err(ModuleError::EventChannelClosed) => {
+                tracing::info!("niri event stream ended");
                 return Ok(());
             }
             Err(e) => {
-                tracing::warn!(%e, backoff_secs, "window event stream error, reconnecting");
+                tracing::warn!(%e, backoff_secs, "niri event stream error, reconnecting");
                 std::thread::sleep(std::time::Duration::from_secs(backoff_secs));
                 backoff_secs = (backoff_secs * 2).min(MAX_BACKOFF_SECS);
             }
@@ -451,8 +394,8 @@ fn run_window_stream(tx: Sender<WindowSnapshot>, filter_workspace: bool) -> Resu
     }
 }
 
-fn try_run_window_stream(
-    tx: &Sender<WindowSnapshot>,
+fn try_run_event_stream(
+    tx: &Sender<CompositorEvent>,
     window_state: &mut WindowTracker,
     filter_workspace: bool,
 ) -> Result<(), ModuleError> {
@@ -460,15 +403,33 @@ fn try_run_window_stream(
     let response = socket.send(Request::EventStream).map_err(ModuleError::CompositorIpc)?;
     validate_handled(response)?;
 
-    tracing::info!("window event stream connected");
+    tracing::info!("event stream connected");
     let mut event_reader = socket.read_events();
 
     loop {
         match event_reader() {
             Ok(event) => {
-                if let Some(snapshot) = window_state.process_event(event, filter_workspace) {
-                    tx.send_blocking(snapshot).map_err(|_| ModuleError::SnapshotChannelClosed)?;
+                let is_workspace_change = matches!(event, Event::WorkspacesChanged { .. });
+                let is_config_reload = matches!(event, Event::ConfigLoaded { .. });
+
+                let events = window_state.process_event(event, filter_workspace);
+                for compositor_event in events {
+                    tx.send_blocking(compositor_event)
+                        .map_err(|_| ModuleError::EventChannelClosed)?;
                 }
+
+                if is_workspace_change {
+                    tx.send_blocking(CompositorEvent::Workspaces)
+                        .map_err(|_| ModuleError::EventChannelClosed)?;
+                }
+
+                if is_config_reload {
+                    tx.send_blocking(CompositorEvent::ConfigReloaded)
+                        .map_err(|_| ModuleError::EventChannelClosed)?;
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
+                tracing::debug!("skipping unknown niri event: {e}");
             }
             Err(e) => {
                 return Err(ModuleError::CompositorIpc(e));
@@ -480,6 +441,7 @@ fn try_run_window_stream(
 #[derive(Debug)]
 struct WindowTracker {
     state: Option<TrackerState>,
+    focused_id: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -496,11 +458,11 @@ enum TrackerState {
 
 impl WindowTracker {
     fn new() -> Self {
-        Self { state: None }
+        Self { state: None, focused_id: None }
     }
 
 	#[tracing::instrument(level = "TRACE", skip(self))]
-    fn process_event(&mut self, event: Event, filter_workspace: bool) -> Option<WindowSnapshot> {
+    fn process_event(&mut self, event: Event, filter_workspace: bool) -> Vec<CompositorEvent> {
         use TrackerState::*;
 
         match event {
@@ -520,6 +482,7 @@ impl WindowTracker {
                     }),
                     _ => Some(WindowsOnly(windows)),
                 };
+                self.maybe_full_snapshot(filter_workspace)
             }
             Event::WorkspacesChanged { workspaces } => {
                 self.state = match self.state.take() {
@@ -537,14 +500,21 @@ impl WindowTracker {
                     }),
                     _ => Some(WorkspacesOnly(workspaces)),
                 };
+                self.maybe_full_snapshot(filter_workspace)
             }
             Event::WindowClosed { id } => {
                 if let Some(Ready { windows, .. }) = &mut self.state {
                     windows.remove(&id);
                 }
+                if self.focused_id == Some(id) {
+                    self.focused_id = None;
+                }
+                self.maybe_full_snapshot(filter_workspace)
             }
             Event::WindowOpenedOrChanged { window } => {
                 if let Some(Ready { windows, last_focused_per_workspace, .. }) = &mut self.state {
+                    let is_new = !windows.contains_key(&window.id);
+
                     if window.is_focused {
                         if let Some(old_focused) = windows.values().find(|w| w.is_focused).map(|w| w.id) {
                             if let Some(old_window) = windows.get(&old_focused) {
@@ -559,11 +529,36 @@ impl WindowTracker {
                         for w in windows.values_mut() {
                             w.is_focused = false;
                         }
+                        self.focused_id = Some(window.id);
                     }
+
+                    let title_changed = if !is_new {
+                        let old_title = windows.get(&window.id).and_then(|w| w.title.clone());
+                        old_title != window.title
+                    } else {
+                        false
+                    };
+
+                    let new_title = window.title.clone();
+                    let win_id = window.id;
                     windows.insert(window.id, window);
+
+                    if is_new {
+                        return self.maybe_full_snapshot(filter_workspace);
+                    }
+
+                    if title_changed {
+                        return vec![CompositorEvent::WindowTitleChanged { id: win_id, title: new_title }];
+                    }
+
+                    // Property change on existing window (e.g. layout change via WindowOpenedOrChanged)
+                    // — still needs full snapshot to recalculate ordering
+                    return self.maybe_full_snapshot(filter_workspace);
                 }
+                vec![]
             }
             Event::WindowFocusChanged { id } => {
+                let old = self.focused_id;
                 if let Some(Ready { windows, last_focused_per_workspace, .. }) = &mut self.state {
                     if let Some(old_focused) = windows.values().find(|w| w.is_focused).map(|w| w.id) {
                         if let Some(window) = windows.get(&old_focused) {
@@ -589,6 +584,8 @@ impl WindowTracker {
                         }
                     }
                 }
+                self.focused_id = id;
+                vec![CompositorEvent::FocusChanged { old, new: id }]
             }
             Event::WorkspaceActivated { id, .. } => {
                 if let Some(Ready { workspaces, .. }) = &mut self.state {
@@ -600,6 +597,7 @@ impl WindowTracker {
                         }
                     }
                 }
+                self.maybe_full_snapshot(filter_workspace)
             }
             Event::WorkspaceActiveWindowChanged { workspace_id, active_window_id } => {
                 tracing::info!("workspace {} active window changed to {:?}", workspace_id, active_window_id);
@@ -611,6 +609,7 @@ impl WindowTracker {
                     }
                     tracing::info!("active window map: {:?}", active_per_workspace);
                 }
+                self.maybe_full_snapshot(filter_workspace)
             }
             Event::WindowLayoutsChanged { changes } => {
                 if let Some(Ready { windows, .. }) = &mut self.state {
@@ -622,14 +621,17 @@ impl WindowTracker {
                         }
                     }
                 }
+                self.maybe_full_snapshot(filter_workspace)
             }
-            _ => {}
+            _ => vec![]
         }
+    }
 
-        if let Some(Ready { windows, workspaces, active_per_workspace, last_focused_per_workspace }) = &self.state {
-            Some(self.generate_snapshot(windows, workspaces, active_per_workspace, last_focused_per_workspace, filter_workspace))
+    fn maybe_full_snapshot(&self, filter_workspace: bool) -> Vec<CompositorEvent> {
+        if let Some(TrackerState::Ready { windows, workspaces, active_per_workspace, last_focused_per_workspace }) = &self.state {
+            vec![CompositorEvent::FullSnapshot(self.generate_snapshot(windows, workspaces, active_per_workspace, last_focused_per_workspace, filter_workspace))]
         } else {
-            None
+            vec![]
         }
     }
 

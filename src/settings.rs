@@ -23,7 +23,7 @@ pub struct Settings {
     show_all_outputs: bool,
     #[serde(default)]
     only_current_workspace: bool,
-    #[serde(default)]
+    #[serde(default = "default_true")]
     show_window_titles: bool,
     #[serde(default = "default_min_width")]
     min_button_width: i32,

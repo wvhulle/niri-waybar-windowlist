@@ -8,9 +8,13 @@ license = "GPL-3.0-or-later"
 [lib]
 crate-type = ["cdylib"]
 
+[lints.clippy]
+pedantic = "warn"
+
 [dependencies]
 anyhow = "1.0"
 async-channel = "2.5"
+dirs = "6"
 async-stream = "0.3"
 bitflags = "2.9"
 evdev = "0.12"
@@ -28,3 +32,6 @@ waybar-cffi = "0.1"
 zbus = "5.10"
 libpulse-binding = { version = "2", default-features = false }
 libpulse-glib-binding = { version = "2", default-features = false }
+kdl = { version = "6", features = ["v1-fallback"] }
+wayland-client = "0.31"
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }
