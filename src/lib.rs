@@ -182,6 +182,9 @@ impl ModuleInstance {
                 EventMessage::WindowTitleChanged { id, title } => {
                     self.handle_window_title_update(id, title.as_deref());
                 }
+                EventMessage::ProcessInfoTick => {
+                    self.handle_process_info_tick();
+                }
                 EventMessage::ConfigReloaded => {
                     tracing::info!("config reloaded, refreshing border colors");
                     self.state.reload_border_colors();
@@ -483,6 +486,35 @@ impl ModuleInstance {
     fn handle_window_title_update(&mut self, id: u64, title: Option<&str>) {
         if let Some(button) = self.buttons.get(&id) {
             button.update_title(title);
+            self.updater.queue_update();
+        }
+    }
+
+    fn handle_process_info_tick(&mut self) {
+        let mut any_changed = false;
+
+        let pids_to_query: Vec<_> = self.window_pids.iter()
+            .filter(|(wid, _)| {
+                self.buttons.get(wid).map_or(false, |b| b.process_info_enabled())
+            })
+            .map(|(&wid, &pid)| (wid, pid))
+            .collect();
+
+        for (wid, pid) in pids_to_query {
+            match system::query_foreground(pid) {
+                Ok(info) => {
+                    if let Some(button) = self.buttons.get(&wid) {
+                        button.update_process_info(info.cwd.as_deref(), info.command.as_deref());
+                        any_changed = true;
+                    }
+                }
+                Err(e) => {
+                    tracing::debug!(window_id = wid, %e, "process info query failed");
+                }
+            }
+        }
+
+        if any_changed {
             self.updater.queue_update();
         }
     }

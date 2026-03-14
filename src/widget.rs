@@ -9,7 +9,7 @@ use waybar_cffi::gtk::{
 };
 use crate::audio::SinkInput;
 use crate::global::SharedState;
-use crate::settings::{ModifierKey, MultiSelectAction};
+use crate::settings::{FontStyle, ModifierKey, MultiSelectAction, ProcessInfoLayout};
 
 /// Set background color on a widget using the deprecated but functional GTK3 API.
 /// The safe gtk-rs bindings omit this method, so we call through FFI.
@@ -60,6 +60,7 @@ pub struct WindowButton {
     skip_clicked: Rc<RefCell<bool>>,
     indicator_color: Rc<Cell<Option<gdk::RGBA>>>,
     is_urgent: Cell<bool>,
+    process_info_enabled: bool,
 }
 
 impl Debug for WindowButton {
@@ -93,6 +94,15 @@ fn scroll_taskbar(delta: f64) {
             adj.set_value(new_value);
         }
     });
+}
+
+fn font_style_to_pango(style: FontStyle) -> (gtk::pango::Weight, gtk::pango::Style) {
+    match style {
+        FontStyle::Normal => (gtk::pango::Weight::Normal, gtk::pango::Style::Normal),
+        FontStyle::Italic => (gtk::pango::Weight::Normal, gtk::pango::Style::Italic),
+        FontStyle::Bold => (gtk::pango::Weight::Bold, gtk::pango::Style::Normal),
+        FontStyle::BoldItalic => (gtk::pango::Weight::Bold, gtk::pango::Style::Italic),
+    }
 }
 
 impl WindowButton {
@@ -165,6 +175,7 @@ impl WindowButton {
         }
 
         let app_id = window.app_id.clone();
+        let process_info_enabled = state.settings().should_show_process_info(app_id.as_deref());
         let icon_location = app_id.as_deref().and_then(|id| state_clone.icon_resolver().resolve(id));
 
         let audio_label = gtk::Label::new(None);
@@ -195,6 +206,7 @@ impl WindowButton {
             skip_clicked: Rc::new(RefCell::new(false)),
             indicator_color,
             is_urgent: Cell::new(false),
+            process_info_enabled,
         };
 
         button.setup_click_handlers(window.id);
@@ -227,6 +239,29 @@ impl WindowButton {
             *self.title.borrow_mut() = Some(t.to_string());
         }
 
+        // For title_regex mode, try to extract process info from the title
+        if self.process_info_enabled {
+            let config = self.state.settings().process_info();
+            if config.source == crate::settings::ProcessInfoSource::TitleRegex {
+                if let Some(text) = title {
+                    let pattern = self.app_id.as_deref()
+                        .and_then(|id| self.state.settings().process_info_pattern(id));
+                    if let Some(re) = pattern {
+                        if let Some(caps) = re.captures(text) {
+                            let cwd = caps.name("cwd").map(|m| m.as_str());
+                            let cmd = caps.name("cmd").map(|m| m.as_str());
+                            self.update_process_info(cwd, cmd);
+                            return;
+                        }
+                    }
+                }
+                // No pattern or regex didn't match — fall through to normal title display
+            } else {
+                // In proc mode, title updates just store the title; polling handles display
+                return;
+            }
+        }
+
         if self.display_titles {
             if let Some(text) = title {
                 let display_text = if self.state.settings().allow_title_linebreaks() {
@@ -241,7 +276,160 @@ impl WindowButton {
                 self.title_label.hide();
             }
         }
+    }
 
+    pub fn process_info_enabled(&self) -> bool {
+        self.process_info_enabled
+    }
+
+    pub fn update_process_info(&self, cwd: Option<&str>, command: Option<&str>) {
+        if !self.display_titles {
+            return;
+        }
+
+        let config = self.state.settings().process_info();
+
+        let formatted_cwd = cwd.map(|c| {
+            let path = if config.shorten_home {
+                if let Some(home) = dirs::home_dir() {
+                    let home_str = home.to_string_lossy();
+                    if c.starts_with(home_str.as_ref()) {
+                        format!("~{}", &c[home_str.len()..])
+                    } else {
+                        c.to_string()
+                    }
+                } else {
+                    c.to_string()
+                }
+            } else {
+                c.to_string()
+            };
+            if config.show_basename_only {
+                std::path::Path::new(&path)
+                    .file_name()
+                    .map_or(path.clone(), |n| n.to_string_lossy().into_owned())
+            } else {
+                path
+            }
+        });
+
+        // If both are None, fall back to stored title
+        if formatted_cwd.is_none() && command.is_none() {
+            let title = self.title.borrow();
+            self.title_label.set_text(title.as_deref().unwrap_or(""));
+            self.title_label.set_attributes(None);
+            let attrs = gtk::pango::AttrList::new();
+            attrs.insert(gtk::pango::AttrInt::new_weight(gtk::pango::Weight::Normal));
+            self.title_label.set_attributes(Some(&attrs));
+            return;
+        }
+
+        match config.layout {
+            ProcessInfoLayout::SingleLine => {
+                let cwd_part = formatted_cwd.as_deref().unwrap_or("");
+                let cmd_part = command.unwrap_or("");
+                let text = if !cwd_part.is_empty() && !cmd_part.is_empty() {
+                    format!("{cwd_part}{}{cmd_part}", config.separator)
+                } else if !cwd_part.is_empty() {
+                    cwd_part.to_string()
+                } else {
+                    cmd_part.to_string()
+                };
+
+                self.title_label.set_text(&text);
+
+                // Build AttrList with different styles for cwd and cmd ranges
+                let attrs = gtk::pango::AttrList::new();
+                let cwd_len = cwd_part.len() as u32;
+                let sep_len = if !cwd_part.is_empty() && !cmd_part.is_empty() {
+                    config.separator.len() as u32
+                } else {
+                    0
+                };
+                let cmd_start = cwd_len + sep_len;
+                let cmd_end = text.len() as u32;
+
+                // CWD range attributes
+                if cwd_len > 0 {
+                    let (weight, style) = font_style_to_pango(config.cwd_font_style);
+                    let mut w = gtk::pango::AttrInt::new_weight(weight);
+                    w.set_start_index(0);
+                    w.set_end_index(cwd_len);
+                    attrs.insert(w);
+                    let mut s = gtk::pango::AttrInt::new_style(style);
+                    s.set_start_index(0);
+                    s.set_end_index(cwd_len);
+                    attrs.insert(s);
+                }
+
+                // CMD range attributes
+                if cmd_start < cmd_end {
+                    let (weight, style) = font_style_to_pango(config.cmd_font_style);
+                    let mut w = gtk::pango::AttrInt::new_weight(weight);
+                    w.set_start_index(cmd_start);
+                    w.set_end_index(cmd_end);
+                    attrs.insert(w);
+                    let mut s = gtk::pango::AttrInt::new_style(style);
+                    s.set_start_index(cmd_start);
+                    s.set_end_index(cmd_end);
+                    attrs.insert(s);
+                }
+
+                self.title_label.set_attributes(Some(&attrs));
+                self.title_label.show();
+            }
+            ProcessInfoLayout::TwoLines => {
+                let cwd_part = formatted_cwd.as_deref().unwrap_or("");
+                let cmd_part = command.unwrap_or("");
+                let text = if !cwd_part.is_empty() && !cmd_part.is_empty() {
+                    format!("{cwd_part}\n{cmd_part}")
+                } else if !cwd_part.is_empty() {
+                    cwd_part.to_string()
+                } else {
+                    cmd_part.to_string()
+                };
+
+                self.title_label.set_text(&text);
+
+                let attrs = gtk::pango::AttrList::new();
+                let cwd_len = cwd_part.len() as u32;
+                let cmd_start = if !cwd_part.is_empty() && !cmd_part.is_empty() {
+                    cwd_len + 1 // +1 for newline
+                } else if cwd_part.is_empty() {
+                    0
+                } else {
+                    cwd_len
+                };
+                let cmd_end = text.len() as u32;
+
+                if cwd_len > 0 {
+                    let (weight, style) = font_style_to_pango(config.cwd_font_style);
+                    let mut w = gtk::pango::AttrInt::new_weight(weight);
+                    w.set_start_index(0);
+                    w.set_end_index(cwd_len);
+                    attrs.insert(w);
+                    let mut s = gtk::pango::AttrInt::new_style(style);
+                    s.set_start_index(0);
+                    s.set_end_index(cwd_len);
+                    attrs.insert(s);
+                }
+
+                if cmd_start < cmd_end {
+                    let (weight, style) = font_style_to_pango(config.cmd_font_style);
+                    let mut w = gtk::pango::AttrInt::new_weight(weight);
+                    w.set_start_index(cmd_start);
+                    w.set_end_index(cmd_end);
+                    attrs.insert(w);
+                    let mut s = gtk::pango::AttrInt::new_style(style);
+                    s.set_start_index(cmd_start);
+                    s.set_end_index(cmd_end);
+                    attrs.insert(s);
+                }
+
+                self.title_label.set_attributes(Some(&attrs));
+                self.title_label.show();
+            }
+        }
     }
 
     #[tracing::instrument(level = "TRACE")]
@@ -862,6 +1050,7 @@ impl WindowButton {
 		    skip_clicked: self.skip_clicked.clone(),
 		    indicator_color: self.indicator_color.clone(),
 		    is_urgent: Cell::new(self.is_urgent.get()),
+		    process_info_enabled: self.process_info_enabled,
 		}
 	}
 

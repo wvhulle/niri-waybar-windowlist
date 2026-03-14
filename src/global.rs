@@ -8,7 +8,7 @@ use crate::{
     compositor::{CompositorClient, CompositorEvent, NiriEventStream, WindowSnapshot},
     icons::IconResolver,
     notifications::{self, NotificationData},
-    settings::Settings,
+    settings::{ProcessInfoSource, Settings},
     theme::BorderColors,
     wayland::WaylandActivator,
 };
@@ -78,6 +78,12 @@ impl SharedState {
             glib::spawn_future_local(forward_audio_updates(tx.clone()));
         }
 
+        let pi = self.settings().process_info();
+        if pi.enabled && pi.source == ProcessInfoSource::Proc {
+            let interval = pi.poll_interval_ms;
+            glib::spawn_future_local(forward_process_info_ticks(tx.clone(), interval));
+        }
+
         glib::spawn_future_local(forward_compositor_events(tx, self.compositor().create_event_stream()));
 
         async_stream::stream! {
@@ -95,6 +101,7 @@ pub enum EventMessage {
     WindowTitleChanged { id: u64, title: Option<String> },
     Workspaces(()),
     AudioUpdate(audio::AudioState),
+    ProcessInfoTick,
     ConfigReloaded,
 }
 
@@ -112,6 +119,16 @@ async fn forward_notifications(tx: Sender<EventMessage>) {
     while let Some(notification) = notification_stream.next().await {
         if let Err(e) = tx.send(EventMessage::Notification(Box::new(notification))).await {
             tracing::error!(%e, "failed to forward notification");
+        }
+    }
+}
+
+async fn forward_process_info_ticks(tx: Sender<EventMessage>, interval_ms: u64) {
+    loop {
+        glib::timeout_future(std::time::Duration::from_millis(interval_ms)).await;
+        if let Err(e) = tx.send(EventMessage::ProcessInfoTick).await {
+            tracing::error!(%e, "failed to forward process info tick");
+            break;
         }
     }
 }

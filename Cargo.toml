@@ -34,3 +34,4 @@ libpulse-glib-binding = { version = "2", default-features = false }
 kdl = { version = "6", features = ["v1-fallback"] }
 wayland-client = "0.31"
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }
+procfs = "0.18.0"

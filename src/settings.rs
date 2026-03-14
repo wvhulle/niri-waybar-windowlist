@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+
 use regex::Regex;
 use serde::{Deserialize, Deserializer};
 
@@ -70,6 +71,8 @@ pub struct Settings {
     left_click_focus_on_press: bool,
     #[serde(default)]
     audio_indicator: AudioIndicatorConfig,
+    #[serde(default)]
+    process_info: ProcessInfoConfig,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Default)]
@@ -103,6 +106,73 @@ impl Default for AudioIndicatorConfig {
             clickable: true,
         }
     }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ProcessInfoConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub source: ProcessInfoSource,
+    #[serde(default = "default_title_patterns", deserialize_with = "parse_regex_map")]
+    pub title_patterns: HashMap<String, Regex>,
+    #[serde(default = "default_poll_interval")]
+    pub poll_interval_ms: u64,
+    #[serde(default)]
+    pub layout: ProcessInfoLayout,
+    #[serde(default = "default_separator")]
+    pub separator: String,
+    #[serde(default = "default_true")]
+    pub shorten_home: bool,
+    #[serde(default = "default_true")]
+    pub show_basename_only: bool,
+    #[serde(default = "default_italic")]
+    pub cwd_font_style: FontStyle,
+    #[serde(default)]
+    pub cmd_font_style: FontStyle,
+}
+
+impl Default for ProcessInfoConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            source: ProcessInfoSource::default(),
+            title_patterns: default_title_patterns(),
+            poll_interval_ms: default_poll_interval(),
+            layout: ProcessInfoLayout::default(),
+            separator: default_separator(),
+            shorten_home: true,
+            show_basename_only: true,
+            cwd_font_style: FontStyle::Italic,
+            cmd_font_style: FontStyle::Normal,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ProcessInfoSource {
+    #[default]
+    TitleRegex,
+    Proc,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ProcessInfoLayout {
+    #[default]
+    SingleLine,
+    TwoLines,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum FontStyle {
+    #[default]
+    Normal,
+    Italic,
+    Bold,
+    BoldItalic,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Default)]
@@ -306,29 +376,99 @@ where
     D: Deserializer<'de>,
 {
     let pattern: Option<String> = Option::deserialize(deserializer)?;
-    pattern.map(|p| Regex::new(&p).map_err(serde::de::Error::custom)).transpose()
+    pattern
+        .map(|p| Regex::new(&p).map_err(serde::de::Error::custom))
+        .transpose()
 }
 
-fn default_true() -> bool { true }
-fn default_min_width() -> i32 { 150 }
-fn default_icon_size() -> i32 { 24 }
-fn default_spacing() -> i32 { 6 }
-fn default_max_taskbar() -> i32 { 1200 }
-fn default_scroll_arrow_left() -> String { "◀".to_string() }
-fn default_scroll_arrow_right() -> String { "▶".to_string() }
+fn parse_regex_map<'de, D>(deserializer: D) -> Result<HashMap<String, Regex>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let raw: HashMap<String, String> = HashMap::deserialize(deserializer)?;
+    raw.into_iter()
+        .map(|(k, v)| Regex::new(&v).map(|r| (k, r)).map_err(serde::de::Error::custom))
+        .collect()
+}
 
-fn default_none() -> ClickAction { ClickAction::Action(WindowAction::None) }
-fn default_left_unfocused() -> ClickAction { ClickAction::Action(WindowAction::FocusWindow) }
-fn default_left_focused() -> ClickAction { ClickAction::Action(WindowAction::MaximizeColumn) }
-fn default_double_click() -> ClickAction { ClickAction::Action(WindowAction::MaximizeWindowToEdges) }
-fn default_right_click() -> ClickAction { ClickAction::Action(WindowAction::Menu) }
-fn default_middle_click() -> ClickAction { ClickAction::Action(WindowAction::CloseWindow) }
+fn default_true() -> bool {
+    true
+}
+fn default_min_width() -> i32 {
+    150
+}
+fn default_icon_size() -> i32 {
+    24
+}
+fn default_spacing() -> i32 {
+    6
+}
+fn default_max_taskbar() -> i32 {
+    1200
+}
+fn default_scroll_arrow_left() -> String {
+    "◀".to_string()
+}
+fn default_scroll_arrow_right() -> String {
+    "▶".to_string()
+}
 
-fn default_modifier() -> ModifierKey { ModifierKey::Ctrl }
-fn default_drag_hover_delay() -> u32 { 500 }
-fn default_tooltip_delay() -> u32 { 300 }
-fn default_audio_playing_icon() -> String { "󰕾".to_string() }
-fn default_audio_muted_icon() -> String { "󰖁".to_string() }
+fn default_none() -> ClickAction {
+    ClickAction::Action(WindowAction::None)
+}
+fn default_left_unfocused() -> ClickAction {
+    ClickAction::Action(WindowAction::FocusWindow)
+}
+fn default_left_focused() -> ClickAction {
+    ClickAction::Action(WindowAction::MaximizeColumn)
+}
+fn default_double_click() -> ClickAction {
+    ClickAction::Action(WindowAction::MaximizeWindowToEdges)
+}
+fn default_right_click() -> ClickAction {
+    ClickAction::Action(WindowAction::Menu)
+}
+fn default_middle_click() -> ClickAction {
+    ClickAction::Action(WindowAction::CloseWindow)
+}
+
+fn default_modifier() -> ModifierKey {
+    ModifierKey::Ctrl
+}
+fn default_drag_hover_delay() -> u32 {
+    500
+}
+fn default_tooltip_delay() -> u32 {
+    300
+}
+fn default_audio_playing_icon() -> String {
+    "󰕾".to_string()
+}
+fn default_audio_muted_icon() -> String {
+    "󰖁".to_string()
+}
+
+fn default_title_patterns() -> HashMap<String, Regex> {
+    // Default pattern: "cwd" or "cwd - cmd"
+    let pattern = Regex::new(r"^(?P<cwd>.+?)(?:\s-\s(?P<cmd>.+))?$")
+        .expect("default pattern is valid");
+    ["foot", "alacritty", "kitty", "wezterm"]
+        .into_iter()
+        .map(|id| (id.to_string(), pattern.clone()))
+        .collect()
+}
+
+fn default_poll_interval() -> u64 {
+    1000
+}
+
+fn default_separator() -> String {
+    " · ".to_string()
+}
+
+fn default_italic() -> FontStyle {
+    FontStyle::Italic
+}
 
 fn default_context_menu() -> Vec<ContextMenuItem> {
     vec![
@@ -391,19 +531,36 @@ impl Settings {
         self.click_actions.clone()
     }
 
-    pub fn should_ignore(&self, app_id: Option<&str>, title: Option<&str>, workspace_id: Option<u64>) -> bool {
+    pub fn should_ignore(
+        &self,
+        app_id: Option<&str>,
+        title: Option<&str>,
+        workspace_id: Option<u64>,
+    ) -> bool {
         for rule in &self.ignore_rules {
-            let app_match = rule.app_id.as_ref().map_or(true, |id| app_id == Some(id.as_str()));
-            let title_match = rule.title.as_ref().map_or(true, |t| title == Some(t.as_str()));
+            let app_match = rule
+                .app_id
+                .as_ref()
+                .map_or(true, |id| app_id == Some(id.as_str()));
+            let title_match = rule
+                .title
+                .as_ref()
+                .map_or(true, |t| title == Some(t.as_str()));
             let title_contains_match = rule.title_contains.as_ref().map_or(true, |contains| {
                 title.map_or(false, |t| t.contains(contains))
             });
-            let title_regex_match = rule.title_regex.as_ref().map_or(true, |regex| {
-                title.map_or(false, |t| regex.is_match(t))
-            });
+            let title_regex_match = rule
+                .title_regex
+                .as_ref()
+                .map_or(true, |regex| title.map_or(false, |t| regex.is_match(t)));
             let workspace_match = rule.workspace.map_or(true, |ws| workspace_id == Some(ws));
 
-            if app_match && title_match && title_contains_match && title_regex_match && workspace_match {
+            if app_match
+                && title_match
+                && title_contains_match
+                && title_regex_match
+                && workspace_match
+            {
                 return true;
             }
         }
@@ -415,7 +572,10 @@ impl Settings {
     }
 
     pub fn notifications_app_map(&self, app_id: &str) -> Option<&str> {
-        self.notifications.map_app_ids.get(app_id).map(String::as_str)
+        self.notifications
+            .map_app_ids
+            .get(app_id)
+            .map(String::as_str)
     }
 
     pub fn notifications_use_desktop_entry(&self) -> bool {
@@ -463,7 +623,8 @@ impl Settings {
     pub fn max_taskbar_width_for_output(&self, output: Option<&str>) -> i32 {
         output
             .and_then(|name| {
-                self.dimensions_per_output.get(name)
+                self.dimensions_per_output
+                    .get(name)
                     .and_then(|dims| dims.max_taskbar_width)
                     .or_else(|| self.max_taskbar_width_per_output.get(name).copied())
             })
@@ -524,5 +685,18 @@ impl Settings {
 
     pub fn audio_indicator(&self) -> &AudioIndicatorConfig {
         &self.audio_indicator
+    }
+
+    pub fn process_info(&self) -> &ProcessInfoConfig {
+        &self.process_info
+    }
+
+    pub fn should_show_process_info(&self, app_id: Option<&str>) -> bool {
+        self.process_info.enabled
+            && app_id.map_or(false, |id| self.process_info.title_patterns.contains_key(id))
+    }
+
+    pub fn process_info_pattern(&self, app_id: &str) -> Option<&Regex> {
+        self.process_info.title_patterns.get(app_id)
     }
 }
