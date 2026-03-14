@@ -151,7 +151,7 @@ static LOGGING: LazyLock<()> = LazyLock::new(|| {
     if let Err(e) = tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("niri_window_buttons=info"))
+                .unwrap_or_else(|_| EnvFilter::new("niri_waybar_windowlist=info"))
         )
         .with_span_events(FmtSpan::CLOSE)
         .with_timer(tracing_subscriber::fmt::time::uptime())

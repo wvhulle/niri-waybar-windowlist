@@ -420,6 +420,7 @@ impl WindowButton {
         let container = self.layout_box.clone();
         let label = self.title_label.clone();
         let audio_event_box = self.audio_event_box.clone();
+        let audio_sink_inputs = self.audio_sink_inputs.clone();
         let show_titles = self.display_titles;
         let icon_dimension = self.state.settings().icon_size();
 
@@ -460,6 +461,7 @@ impl WindowButton {
                 let container_copy = container.clone();
                 let label_copy = label.clone();
                 let audio_copy = audio_event_box.clone();
+                let audio_inputs = audio_sink_inputs.clone();
                 let button_copy = button.clone();
                 gtk::glib::source::idle_add_local_once(move || {
                     for child in container_copy.children() {
@@ -467,14 +469,21 @@ impl WindowButton {
                     }
 
                     container_copy.pack_start(&icon_image, false, false, 0);
-                    container_copy.pack_start(&audio_copy, false, false, 0);
 
                     if show_titles {
                         container_copy.pack_start(&label_copy, true, true, 0);
                     }
 
+                    container_copy.pack_start(&audio_copy, false, false, 0);
+
                     container_copy.show_all();
                     button_copy.show_all();
+
+                    // Restore audio indicator visibility after re-packing,
+                    // since no_show_all prevents show_all() from showing it.
+                    if !audio_inputs.borrow().is_empty() {
+                        audio_copy.show();
+                    }
                 });
             }
         });

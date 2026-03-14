@@ -57,7 +57,7 @@ fn setup_pulse_audio(tx: Sender<AudioState>) {
         }
     };
 
-    let mut context = match Context::new(&mainloop, "niri-window-buttons") {
+    let mut context = match Context::new(&mainloop, "niri-waybar-windowlist") {
         Some(c) => c,
         None => {
             tracing::error!("failed to create PulseAudio context");

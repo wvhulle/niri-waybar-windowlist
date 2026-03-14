@@ -1,5 +1,5 @@
 {
-  description = "Waybar CFFI module for niri window buttons / taskbar";
+  description = "Waybar CFFI module for niri window list";
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
@@ -61,11 +61,11 @@
               doCheck = false;
               postInstall = ''
                 mkdir -p $out/lib
-                find target -name "libniri_window_buttons.so" -exec cp {} $out/lib/ \;
+                find target -name "libniri_waybar_windowlist.so" -exec cp {} $out/lib/ \;
               '';
               meta = {
-                description = "Waybar CFFI module for niri window buttons / taskbar";
-                homepage = "https://github.com/adelmonte/niri_window_buttons";
+                description = "Waybar CFFI module for niri window list";
+                homepage = "https://github.com/wvhulle/niri-waybar-windowlist";
                 license = pkgs.lib.licenses.gpl3Plus;
               };
             }

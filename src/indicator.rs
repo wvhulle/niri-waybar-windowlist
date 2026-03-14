@@ -1,4 +1,4 @@
-use waybar_cffi::gtk::{self as gtk, prelude::{LabelExt, WidgetExt}};
+use waybar_cffi::gtk::{self as gtk, prelude::{LabelExt, WidgetExt, WidgetExtManual}};
 use crate::audio::SinkInput;
 use crate::button::WindowButton;
 
@@ -37,6 +37,16 @@ impl WindowButton {
                 if !inputs.is_empty() {
                     crate::audio::toggle_mute(&inputs);
                 }
+                gtk::glib::Propagation::Stop
+            } else {
+                gtk::glib::Propagation::Proceed
+            }
+        });
+
+        // Absorb release events so they don't propagate to the parent
+        // event_box and trigger window focus/click actions.
+        self.audio_event_box.connect_button_release_event(|_, event| {
+            if event.button() == 1 {
                 gtk::glib::Propagation::Stop
             } else {
                 gtk::glib::Propagation::Proceed

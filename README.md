@@ -1,4 +1,4 @@
-# niri_window_buttons [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+# niri_waybar_windowlist [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
 A Waybar module for displaying and managing traditional window buttons in the Niri compositor.
 
@@ -26,11 +26,11 @@ A Waybar module for displaying and managing traditional window buttons in the Ni
 ### From AUR (Arch Linux)
 
 ```bash
-yay -S niri_window_buttons      # stable release
-yay -S niri_window_buttons-git  # latest git version
+yay -S niri_waybar_windowlist      # stable release
+yay -S niri_waybar_windowlist-git  # latest git version
 ```
 
-The compiled module will be at `/usr/lib/waybar/libniri_window_buttons.so`.
+The compiled module will be at `/usr/lib/waybar/libniri_waybar_windowlist.so`.
 
 ### Manual Installation
 
@@ -38,7 +38,7 @@ The compiled module will be at `/usr/lib/waybar/libniri_window_buttons.so`.
 cargo build --release
 ```
 
-The compiled module will be at `target/release/libniri_window_buttons.so`.
+The compiled module will be at `target/release/libniri_waybar_windowlist.so`.
 
 ## Configuration
 
@@ -46,9 +46,9 @@ The compiled module will be at `target/release/libniri_window_buttons.so`.
 
 ```jsonc
 {
-  "modules-left": ["cffi/niri_window_buttons"],
-  "cffi/niri_window_buttons": {
-    "module_path": "/path/to/libniri_window_buttons.so",
+  "modules-center": ["cffi/niri_waybar_windowlist"],
+  "cffi/niri_waybar_windowlist": {
+    "module_path": "/path/to/libniri_waybar_windowlist.so",
     "only_current_workspace": false,
     "show_window_titles": true,
     "truncate_titles": true,
@@ -456,50 +456,6 @@ The icons use [Nerd Fonts](https://www.nerdfonts.com/) codepoints. Make sure you
 The indicator appears to the right of the application icon. For multi-process applications (Firefox, Chromium), when multiple windows share a process, the indicator is shown only on the focused window. Clicking the indicator toggles mute for all audio streams belonging to that process.
 
 The indicator can be styled via CSS using the `.audio-indicator` class (see [Styling](#styling)).
-
-## Styling
-
-Customize appearance using Waybar's GTK CSS. The module container uses class `.niri_window_buttons` and contains `button` elements.
-
-**Available CSS Classes:**
-
-| Class | Description |
-|-------|-------------|
-| `.focused` | Currently focused window |
-| `.selected` | Multi-selected window |
-| `.urgent` | Window with pending notification |
-| `.dragging` | Window being dragged |
-| `.drag-over` | Valid drop target during drag |
-| `.audio-indicator` | Audio indicator icon inside each button |
-| Custom | Classes from `apps` configuration |
-
-**Example:**
-
-```css
-#cffi\.niri_window_buttons button {
-  padding: 4px 8px;
-  border-radius: 4px;
-  transition: background 200ms;
-}
-
-#cffi\.niri_window_buttons button.focused {
-  background: rgba(255, 255, 255, 0.3);
-  border-bottom: 3px solid #81a1c1;
-}
-
-#cffi\.niri_window_buttons button.selected {
-  background: rgba(136, 192, 208, 0.3);
-  border: 1px dashed #88c0d0;
-}
-
-#cffi\.niri_window_buttons button.urgent {
-  background: rgba(191, 97, 106, 0.4);
-}
-
-#cffi\.niri_window_buttons button.unread {
-  color: #ebcb8b;
-}
-```
 
 ## Limitations
 
