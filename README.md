@@ -56,7 +56,6 @@ All options have sensible defaults. Override only what you need.
 | -------------------- | ------- | ------------------------------- |
 | `min_button_width`   | `150`   | Minimum button width (px)       |
 | `max_button_width`   | none    | Maximum button width (px)       |
-| `max_taskbar_width`  | `1200`  | Total taskbar width limit (px)  |
 | `icon_size`          | `24`    | Icon size (px)                  |
 | `icon_spacing`       | `6`     | Gap between icon and title (px) |
 | `scroll_arrow_left`  | `"◀"`   | Left overflow arrow             |

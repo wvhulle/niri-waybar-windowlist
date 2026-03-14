@@ -258,7 +258,7 @@ impl WindowButton {
         btn: &gtk::EventBox,
         window_id: u64,
         focused_window: &FocusedWindow,
-        indicator_color: &Rc<Cell<Option<gdk::RGBA>>>,
+        indicator_color: &Rc<Cell<Option<crate::theme::IndicatorColor>>>,
         state: &SharedState,
     ) {
         if let Some(parent) = btn.parent() {

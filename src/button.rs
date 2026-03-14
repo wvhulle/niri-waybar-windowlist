@@ -38,7 +38,7 @@ pub struct WindowButton {
     pub(crate) focused_window: FocusedWindow,
     pub(crate) tooltip_timeout: Rc<RefCell<Option<gtk::glib::SourceId>>>,
     pub(crate) skip_clicked: Rc<RefCell<bool>>,
-    pub(crate) indicator_color: Rc<Cell<Option<gdk::RGBA>>>,
+    pub(crate) indicator_color: Rc<Cell<Option<crate::theme::IndicatorColor>>>,
     pub(crate) is_urgent: Cell<bool>,
     pub(crate) process_info_enabled: bool,
 }
@@ -90,23 +90,15 @@ impl WindowButton {
         attrs.insert(gtk::pango::AttrInt::new_weight(gtk::pango::Weight::Normal));
         title_label.set_attributes(Some(&attrs));
 
-        let indicator_color: Rc<Cell<Option<gdk::RGBA>>> = Rc::new(Cell::new(None));
-        let indicator_for_draw = indicator_color.clone();
+        let indicator_color: Rc<Cell<Option<crate::theme::IndicatorColor>>> =
+            Rc::new(Cell::new(None));
 
         let event_box = gtk::EventBox::new();
         event_box.set_visible_window(true);
         event_box.set_vexpand(true);
         event_box.add(&layout_box);
 
-        event_box.connect_draw(move |widget, cr| {
-            if let Some(rgba) = indicator_for_draw.get() {
-                let w = widget.allocation().width() as f64;
-                cr.set_source_rgba(rgba.red(), rgba.green(), rgba.blue(), rgba.alpha());
-                cr.rectangle(0.0, 0.0, w, 3.0);
-                cr.fill().ok();
-            }
-            gtk::glib::Propagation::Proceed
-        });
+        Self::setup_border_indicator(&indicator_color, &event_box);
         event_box.add_events(
             gdk::EventMask::BUTTON_PRESS_MASK
                 | gdk::EventMask::BUTTON_RELEASE_MASK
