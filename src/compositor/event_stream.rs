@@ -1,4 +1,5 @@
 use async_channel::{Receiver, Sender};
+use niri_ipc::{Event, Request};
 
 use super::{
     ipc::{connect_socket, validate_handled},
@@ -6,7 +7,6 @@ use super::{
     window_info::WindowSnapshot,
 };
 use crate::CompositorIpcError;
-use niri_ipc::{Event, Request};
 
 pub enum CompositorEvent {
     FullSnapshot(WindowSnapshot),

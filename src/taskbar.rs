@@ -39,4 +39,3 @@ pub type FocusedWindow = Rc<std::cell::Cell<Option<u64>>>;
 pub fn create_focused_window() -> FocusedWindow {
     Rc::new(std::cell::Cell::new(None))
 }
-

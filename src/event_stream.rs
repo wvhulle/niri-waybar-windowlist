@@ -21,15 +21,31 @@ pub enum EventMessage {
     ConfigReloaded,
 }
 
-pub fn create_event_stream(state: &SharedState) -> impl futures::Stream<Item = EventMessage> {
+pub fn create_event_stream(
+    state: &SharedState,
+) -> (
+    impl futures::Stream<Item = EventMessage>,
+    Option<audio::AudioMonitor>,
+) {
     let (tx, rx) = async_channel::unbounded();
+    let mut audio_monitor = None;
 
     if state.settings().notifications_enabled() {
         glib::spawn_future_local(forward_notifications(tx.clone()));
     }
 
     if state.settings().audio_indicator().enabled {
-        glib::spawn_future_local(forward_audio_updates(tx.clone()));
+        let (monitor, stream) = audio::start();
+        let tx_audio = tx.clone();
+        glib::spawn_future_local(async move {
+            let mut stream = Box::pin(stream);
+            while let Some(state) = stream.next().await {
+                if let Err(e) = tx_audio.send(EventMessage::AudioUpdate(state)).await {
+                    tracing::error!(%e, "failed to forward audio update");
+                }
+            }
+        });
+        audio_monitor = Some(monitor);
     }
 
     let pi = state.settings().process_info();
@@ -43,20 +59,13 @@ pub fn create_event_stream(state: &SharedState) -> impl futures::Stream<Item = E
         state.compositor().create_event_stream(),
     ));
 
-    async_stream::stream! {
+    let stream = async_stream::stream! {
         while let Ok(event) = rx.recv().await {
             yield event;
         }
-    }
-}
+    };
 
-async fn forward_audio_updates(tx: Sender<EventMessage>) {
-    let mut stream = Box::pin(audio::create_stream());
-    while let Some(state) = stream.next().await {
-        if let Err(e) = tx.send(EventMessage::AudioUpdate(state)).await {
-            tracing::error!(%e, "failed to forward audio update");
-        }
-    }
+    (stream, audio_monitor)
 }
 
 async fn forward_notifications(tx: Sender<EventMessage>) {

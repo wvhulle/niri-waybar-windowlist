@@ -19,7 +19,7 @@ use waybar_cffi::{
     waybar_module, Module,
 };
 
-mod audio;
+pub mod audio;
 mod button;
 mod click_actions;
 mod compositor;
@@ -34,7 +34,6 @@ mod settings;
 mod taskbar;
 mod theme;
 mod title;
-mod wayland;
 
 use audio::AudioState;
 use button::WindowButton;
@@ -47,7 +46,6 @@ use taskbar::{
     clear_selection, create_focused_window, create_selection_state, FocusedWindow, SelectionState,
 };
 use theme::BorderColors;
-use wayland::WaylandActivator;
 
 // ── Errors (inlined from errors.rs) ──
 
@@ -88,7 +86,6 @@ struct StateInner {
     settings: Settings,
     icon_resolver: IconResolver,
     compositor: CompositorClient,
-    wayland_activator: Option<WaylandActivator>,
 }
 
 thread_local! {
@@ -99,12 +96,10 @@ impl SharedState {
     fn create(settings: Settings) -> Self {
         let colors = crate::theme::load_border_colors();
         BORDER_COLORS.with(|cell| cell.set(colors));
-        let wayland_activator = WaylandActivator::connect();
         Self(Arc::new(StateInner {
             compositor: CompositorClient::create(settings.clone()),
             icon_resolver: IconResolver::new(),
             settings,
-            wayland_activator,
         }))
     }
 
@@ -118,10 +113,6 @@ impl SharedState {
 
     pub fn compositor(&self) -> &CompositorClient {
         &self.0.compositor
-    }
-
-    pub fn wayland_activator(&self) -> Option<&WaylandActivator> {
-        self.0.wayland_activator.as_ref()
     }
 
     pub fn border_colors(&self) -> BorderColors {
@@ -252,6 +243,7 @@ struct ModuleInstance {
     selection: SelectionState,
     focused_window: FocusedWindow,
     audio_state: AudioState,
+    _audio_monitor: Option<audio::AudioMonitor>,
     window_pids: HashMap<u64, u32>,
     updater: WaybarUpdater,
 }
@@ -267,7 +259,8 @@ impl ModuleInstance {
             state,
             selection: create_selection_state(),
             focused_window: create_focused_window(),
-            audio_state: AudioState::new(),
+            audio_state: AudioState::default(),
+            _audio_monitor: None,
             window_pids: HashMap::new(),
             updater,
         }
@@ -276,7 +269,9 @@ impl ModuleInstance {
     async fn run_event_loop(&mut self) {
         let display_filter = Arc::new(Mutex::new(self.determine_display_filter().await));
 
-        let mut event_stream = Box::pin(event_stream::create_event_stream(&self.state));
+        let (stream, audio_monitor) = event_stream::create_event_stream(&self.state);
+        self._audio_monitor = audio_monitor;
+        let mut event_stream = Box::pin(stream);
 
         while let Some(event) = event_stream.next().await {
             match event {
@@ -656,35 +651,16 @@ impl ModuleInstance {
     }
 
     fn update_button_audio_states(&self) {
-        let pid_window_count: HashMap<u32, usize> =
-            self.window_pids
-                .values()
-                .fold(HashMap::new(), |mut counts, &pid| {
-                    *counts.entry(pid).or_insert(0) += 1;
-                    counts
-                });
-
-        for (window_id, button) in &self.buttons {
-            let Some(&pid) = self.window_pids.get(window_id) else {
-                button.update_audio_state(&[]);
-                continue;
-            };
-            let Some(inputs) = self.audio_state.get(&pid) else {
-                button.update_audio_state(&[]);
-                continue;
-            };
-            if pid_window_count.get(&pid).copied().unwrap_or(1) > 1 {
-                let focused_has_pid = self
-                    .previous_focused
-                    .and_then(|fid| self.window_pids.get(&fid))
-                    .map(|&fpid| fpid == pid)
-                    .unwrap_or(false);
-                if focused_has_pid && Some(*window_id) != self.previous_focused {
-                    button.update_audio_state(&[]);
-                    continue;
-                }
-            }
-            button.update_audio_state(inputs);
+        for (_window_id, button) in &self.buttons {
+            let status = button.app_id.as_deref().and_then(|app_id| {
+                let id_lower = app_id.to_lowercase();
+                self.audio_state
+                    .by_desktop_entry
+                    .get(&id_lower)
+                    .or_else(|| self.audio_state.by_bus_suffix.get(&id_lower))
+                    .copied()
+            });
+            button.update_audio_state(status);
         }
     }
 }

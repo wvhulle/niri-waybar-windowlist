@@ -29,7 +29,7 @@ pub struct WindowButton {
     pub(crate) title_label: gtk::Label,
     pub(crate) audio_event_box: EventBox,
     pub(crate) audio_label: gtk::Label,
-    pub(crate) audio_sink_inputs: Rc<RefCell<Vec<crate::audio::SinkInput>>>,
+    pub(crate) audio_visible: Rc<Cell<bool>>,
     pub(crate) display_titles: bool,
     pub(crate) state: SharedState,
     pub(crate) window_id: u64,
@@ -126,7 +126,7 @@ impl WindowButton {
         audio_event_box.add(&audio_label);
         audio_event_box.set_no_show_all(true);
 
-        let audio_sink_inputs = Rc::new(RefCell::new(Vec::<crate::audio::SinkInput>::new()));
+        let audio_visible = Rc::new(Cell::new(false));
 
         let button = Self {
             app_id,
@@ -135,7 +135,7 @@ impl WindowButton {
             title_label,
             audio_event_box,
             audio_label,
-            audio_sink_inputs,
+            audio_visible,
             display_titles,
             state: state_clone,
             window_id: window.id,
@@ -150,7 +150,6 @@ impl WindowButton {
         };
 
         button.setup_click_handlers(window.id);
-        button.setup_audio_click_handler();
         button.setup_hover();
         button.setup_drag_reorder();
         button.setup_icon_rendering(icon_location);
@@ -205,7 +204,7 @@ impl WindowButton {
             title_label: self.title_label.clone(),
             audio_event_box: self.audio_event_box.clone(),
             audio_label: self.audio_label.clone(),
-            audio_sink_inputs: self.audio_sink_inputs.clone(),
+            audio_visible: self.audio_visible.clone(),
             display_titles: self.display_titles,
             state: self.state.clone(),
             window_id: self.window_id,
@@ -445,7 +444,7 @@ impl WindowButton {
         let container = self.layout_box.clone();
         let label = self.title_label.clone();
         let audio_event_box = self.audio_event_box.clone();
-        let audio_sink_inputs = self.audio_sink_inputs.clone();
+        let audio_visible = self.audio_visible.clone();
         let show_titles = self.display_titles;
         let icon_dimension = self.state.settings().icon_size();
 
@@ -496,7 +495,7 @@ impl WindowButton {
                     let container_copy = container.clone();
                     let label_copy = label.clone();
                     let audio_copy = audio_event_box.clone();
-                    let audio_inputs = audio_sink_inputs.clone();
+                    let audio_vis = audio_visible.clone();
                     let button_copy = button.clone();
                     gtk::glib::source::idle_add_local_once(move || {
                         for child in container_copy.children() {
@@ -516,7 +515,7 @@ impl WindowButton {
 
                         // Restore audio indicator visibility after re-packing,
                         // since no_show_all prevents show_all() from showing it.
-                        if !audio_inputs.borrow().is_empty() {
+                        if audio_vis.get() {
                             audio_copy.show();
                         }
                     });
@@ -581,5 +580,4 @@ impl WindowButton {
             gtk::glib::Propagation::Proceed
         });
     }
-
 }

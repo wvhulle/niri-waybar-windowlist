@@ -29,7 +29,7 @@
               overlays = [ (import rust-overlay) ];
             };
             craneLib = (crane.mkLib pkgs).overrideToolchain (
-              pkgs.rust-bin.stable.latest.default.override {
+              pkgs.rust-bin.nightly.latest.default.override {
                 extensions = [ "rust-src" ];
               }
             );
@@ -45,7 +45,6 @@
             strictDeps = true;
             nativeBuildInputs = [ pkgs.pkg-config ];
             buildInputs = [
-              pkgs.libpulseaudio
               pkgs.dbus
               pkgs.glib
               pkgs.gtk3
@@ -85,7 +84,6 @@
             strictDeps = true;
             nativeBuildInputs = [ pkgs.pkg-config ];
             buildInputs = [
-              pkgs.libpulseaudio
               pkgs.dbus
               pkgs.glib
               pkgs.gtk3

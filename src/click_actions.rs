@@ -297,17 +297,15 @@ impl WindowButton {
         state: &SharedState,
         window_id: u64,
         action: &crate::settings::WindowAction,
-        app_id: Option<&str>,
-        title: Option<&str>,
+        _app_id: Option<&str>,
+        _title: Option<&str>,
     ) {
         use crate::settings::WindowAction;
         match action {
             WindowAction::None => {}
             WindowAction::FocusWindow => {
-                if let Some(activator) = state.wayland_activator() {
-                    activator.activate(app_id, title);
-                } else {
-                    tracing::warn!(id = window_id, "no Wayland activator available");
+                if let Err(e) = state.compositor().focus_window(window_id) {
+                    tracing::warn!(%e, id = window_id, "focus failed");
                 }
             }
             WindowAction::CloseWindow => {

@@ -182,7 +182,7 @@ Marks window buttons as urgent when the app sends a notification. Enabled by def
 
 ### Audio Indicator
 
-Shows a speaker icon after the window title when the app is playing audio. Click to toggle mute. Enabled by default. Requires `libpulse`.
+Shows a speaker icon after the window title when the app is playing audio. Click to toggle mute. Enabled by default.
 
 ```jsonc
 "audio_indicator": {

@@ -23,7 +23,8 @@ fn parse_hex_color(hex: &str) -> Option<gdk::RGBA> {
 }
 
 /// A color that is either solid or a gradient with `from` and `to` endpoints.
-/// When rendered as an indicator, `from` is used at the center and `to` at the edges.
+/// When rendered as an indicator, `from` is used at the center and `to` at the
+/// edges.
 #[derive(Debug, Clone, Copy)]
 pub enum IndicatorColor {
     Solid(gdk::RGBA),
@@ -37,11 +38,22 @@ pub struct BorderColors {
 }
 
 /// Parse a border/gradient node into an `IndicatorColor`.
-/// Handles both `active-gradient from="..." to="..."` and `active-color "#..."` forms.
-fn parse_indicator_color(border: &kdl::KdlDocument, gradient_key: &str, color_key: &str) -> Option<IndicatorColor> {
+/// Handles both `active-gradient from="..." to="..."` and `active-color "#..."`
+/// forms.
+fn parse_indicator_color(
+    border: &kdl::KdlDocument,
+    gradient_key: &str,
+    color_key: &str,
+) -> Option<IndicatorColor> {
     if let Some(node) = border.get(gradient_key) {
-        let from = node.get("from").and_then(|e| e.as_string()).and_then(parse_hex_color);
-        let to = node.get("to").and_then(|e| e.as_string()).and_then(parse_hex_color);
+        let from = node
+            .get("from")
+            .and_then(|e| e.as_string())
+            .and_then(parse_hex_color);
+        let to = node
+            .get("to")
+            .and_then(|e| e.as_string())
+            .and_then(parse_hex_color);
         match (from, to) {
             (Some(f), Some(t)) => return Some(IndicatorColor::Gradient { from: f, to: t }),
             (Some(c), None) | (None, Some(c)) => return Some(IndicatorColor::Solid(c)),
@@ -68,9 +80,15 @@ pub fn load_border_colors() -> BorderColors {
     parse_border_colors(&content)
 }
 
-/// Niri default colors (from focus-ring defaults: #7fc8ff active, #9b0000 urgent).
+/// Niri default colors (from focus-ring defaults: #7fc8ff active, #9b0000
+/// urgent).
 fn default_active() -> IndicatorColor {
-    IndicatorColor::Solid(gdk::RGBA::new(0x7f as f64 / 255.0, 0xc8 as f64 / 255.0, 0xff as f64 / 255.0, 1.0))
+    IndicatorColor::Solid(gdk::RGBA::new(
+        0x7f as f64 / 255.0,
+        0xc8 as f64 / 255.0,
+        0xff as f64 / 255.0,
+        1.0,
+    ))
 }
 
 fn default_urgent() -> IndicatorColor {
@@ -84,17 +102,16 @@ fn parse_border_colors(content: &str) -> BorderColors {
 
     let layout = doc.get("layout").and_then(|n| n.children());
 
-    // Try border first, then focus-ring as fallback (niri enables focus-ring by default).
+    // Try border first, then focus-ring as fallback (niri enables focus-ring by
+    // default).
     let section = layout
         .and_then(|d| d.get("border").and_then(|n| n.children()))
         .or_else(|| layout.and_then(|d| d.get("focus-ring").and_then(|n| n.children())));
 
     let (active, urgent) = match section {
         Some(s) => (
-            parse_indicator_color(s, "active-gradient", "active-color")
-                .unwrap_or(default_active()),
-            parse_indicator_color(s, "urgent-gradient", "urgent-color")
-                .unwrap_or(default_urgent()),
+            parse_indicator_color(s, "active-gradient", "active-color").unwrap_or(default_active()),
+            parse_indicator_color(s, "urgent-gradient", "urgent-color").unwrap_or(default_urgent()),
         ),
         None => (default_active(), default_urgent()),
     };
