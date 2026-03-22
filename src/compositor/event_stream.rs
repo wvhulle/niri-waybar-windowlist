@@ -1,11 +1,7 @@
 use async_channel::{Receiver, Sender};
 use niri_ipc::{Event, Request};
 
-use super::{
-    ipc::{connect_socket, validate_handled},
-    tracker::WindowTracker,
-    window_info::WindowSnapshot,
-};
+use super::{connect_socket, tracker::WindowTracker, validate_handled, WindowSnapshot};
 use crate::CompositorIpcError;
 
 pub enum CompositorEvent {
@@ -24,7 +20,7 @@ impl NiriEventStream {
     pub(super) fn start(filter_workspace: bool) -> Self {
         let (tx, rx) = async_channel::unbounded();
         std::thread::spawn(move || {
-            if let Err(e) = run_event_stream(tx, filter_workspace) {
+            if let Err(e) = run_event_stream(&tx, filter_workspace) {
                 tracing::error!(%e, "niri event stream terminated");
             }
         });
@@ -38,7 +34,7 @@ impl NiriEventStream {
 }
 
 fn run_event_stream(
-    tx: Sender<CompositorEvent>,
+    tx: &Sender<CompositorEvent>,
     filter_workspace: bool,
 ) -> Result<(), CompositorIpcError> {
     const MAX_BACKOFF_SECS: u64 = 30;
@@ -46,7 +42,7 @@ fn run_event_stream(
     let mut window_state = WindowTracker::new();
 
     loop {
-        match try_run_event_stream(&tx, &mut window_state, filter_workspace) {
+        match try_run_event_stream(tx, &mut window_state, filter_workspace) {
             Ok(()) | Err(CompositorIpcError::EventChannelClosed) => {
                 tracing::info!("niri event stream ended");
                 return Ok(());

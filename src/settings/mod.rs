@@ -13,9 +13,6 @@ use serde::{Deserialize, Deserializer};
 pub struct Settings {
     apps: HashMap<String, Vec<AppRule>>,
     notifications: NotificationConfig,
-    show_all_outputs: bool,
-    only_current_workspace: bool,
-    show_window_titles: bool,
     icon_size: i32,
     icon_spacing: i32,
     click_actions: ClickActions,
@@ -23,14 +20,68 @@ pub struct Settings {
     context_menu: Vec<ContextMenuItem>,
     multi_select_modifier: ModifierKey,
     multi_select_menu: Vec<MultiSelectMenuItem>,
-    drag_hover_focus: bool,
-    drag_hover_focus_delay: u32,
-    truncate_titles: bool,
-    allow_title_linebreaks: bool,
-    show_tooltip: bool,
-    tooltip_delay: u32,
     audio_indicator: AudioIndicatorConfig,
     process_info: ProcessInfoConfig,
+    #[serde(flatten)]
+    display: DisplayConfig,
+    #[serde(flatten)]
+    tooltip: TooltipConfig,
+    #[serde(flatten)]
+    drag: DragConfig,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct DisplayConfig {
+    show_all_outputs: bool,
+    only_current_workspace: bool,
+    show_window_titles: bool,
+    truncate_titles: bool,
+    allow_title_linebreaks: bool,
+}
+
+impl Default for DisplayConfig {
+    fn default() -> Self {
+        Self {
+            show_all_outputs: false,
+            only_current_workspace: true,
+            show_window_titles: true,
+            truncate_titles: true,
+            allow_title_linebreaks: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct TooltipConfig {
+    show_tooltip: bool,
+    tooltip_delay: u32,
+}
+
+impl Default for TooltipConfig {
+    fn default() -> Self {
+        Self {
+            show_tooltip: true,
+            tooltip_delay: 300,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct DragConfig {
+    drag_hover_focus: bool,
+    drag_hover_focus_delay: u32,
+}
+
+impl Default for DragConfig {
+    fn default() -> Self {
+        Self {
+            drag_hover_focus: true,
+            drag_hover_focus_delay: 500,
+        }
+    }
 }
 
 impl Default for Settings {
@@ -38,9 +89,6 @@ impl Default for Settings {
         Self {
             apps: HashMap::new(),
             notifications: NotificationConfig::default(),
-            show_all_outputs: false,
-            only_current_workspace: true,
-            show_window_titles: true,
             icon_size: 24,
             icon_spacing: 6,
             click_actions: ClickActions::default(),
@@ -48,14 +96,11 @@ impl Default for Settings {
             context_menu: default_context_menu(),
             multi_select_modifier: ModifierKey::Ctrl,
             multi_select_menu: default_multi_select_menu(),
-            drag_hover_focus: true,
-            drag_hover_focus_delay: 500,
-            truncate_titles: true,
-            allow_title_linebreaks: false,
-            show_tooltip: true,
-            tooltip_delay: 300,
             audio_indicator: AudioIndicatorConfig::default(),
             process_info: ProcessInfoConfig::default(),
+            display: DisplayConfig::default(),
+            tooltip: TooltipConfig::default(),
+            drag: DragConfig::default(),
         }
     }
 }
@@ -120,6 +165,7 @@ pub struct AppRule {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct IgnoreRule {
     pub app_id: Option<String>,
     pub title: Option<String>,
@@ -127,18 +173,6 @@ pub struct IgnoreRule {
     pub title_regex: Option<Regex>,
     pub title_contains: Option<String>,
     pub workspace: Option<u64>,
-}
-
-impl Default for IgnoreRule {
-    fn default() -> Self {
-        Self {
-            app_id: None,
-            title: None,
-            title_regex: None,
-            title_contains: None,
-            workspace: None,
-        }
-    }
 }
 
 fn parse_regex<'de, D>(deserializer: D) -> Result<Regex, D::Error>
@@ -167,7 +201,7 @@ impl Settings {
                 self.apps.get(id)?.iter().find_map(|rule| {
                     rule.pattern
                         .is_match(t)
-                        .then(|| rule.click_actions.as_ref())
+                        .then_some(rule.click_actions.as_ref())
                         .flatten()
                         .cloned()
                 })
@@ -184,19 +218,20 @@ impl Settings {
         self.ignore_rules.iter().any(|rule| {
             rule.app_id
                 .as_ref()
-                .map_or(true, |id| app_id == Some(id.as_str()))
+                .is_none_or(|id| app_id == Some(id.as_str()))
                 && rule
                     .title
                     .as_ref()
-                    .map_or(true, |t| title == Some(t.as_str()))
-                && rule.title_contains.as_ref().map_or(true, |contains| {
-                    title.map_or(false, |t| t.contains(contains))
-                })
+                    .is_none_or(|t| title == Some(t.as_str()))
+                && rule
+                    .title_contains
+                    .as_ref()
+                    .is_none_or(|contains| title.is_some_and(|t| t.contains(contains)))
                 && rule
                     .title_regex
                     .as_ref()
-                    .map_or(true, |regex| title.map_or(false, |t| regex.is_match(t)))
-                && rule.workspace.map_or(true, |ws| workspace_id == Some(ws))
+                    .is_none_or(|regex| title.is_some_and(|t| regex.is_match(t)))
+                && rule.workspace.is_none_or(|ws| workspace_id == Some(ws))
         })
     }
 
@@ -220,15 +255,15 @@ impl Settings {
     }
 
     pub fn show_all_outputs(&self) -> bool {
-        self.show_all_outputs
+        self.display.show_all_outputs
     }
 
     pub fn only_current_workspace(&self) -> bool {
-        self.only_current_workspace
+        self.display.only_current_workspace
     }
 
     pub fn show_window_titles(&self) -> bool {
-        self.show_window_titles
+        self.display.show_window_titles
     }
 
     pub fn icon_size(&self) -> i32 {
@@ -252,27 +287,27 @@ impl Settings {
     }
 
     pub fn drag_hover_focus(&self) -> bool {
-        self.drag_hover_focus
+        self.drag.drag_hover_focus
     }
 
     pub fn drag_hover_focus_delay(&self) -> u32 {
-        self.drag_hover_focus_delay
+        self.drag.drag_hover_focus_delay
     }
 
     pub fn truncate_titles(&self) -> bool {
-        self.truncate_titles
+        self.display.truncate_titles
     }
 
     pub fn allow_title_linebreaks(&self) -> bool {
-        self.allow_title_linebreaks
+        self.display.allow_title_linebreaks
     }
 
     pub fn show_tooltip(&self) -> bool {
-        self.show_tooltip
+        self.tooltip.show_tooltip
     }
 
     pub fn tooltip_delay(&self) -> u32 {
-        self.tooltip_delay
+        self.tooltip.tooltip_delay
     }
 
     pub fn audio_indicator(&self) -> &AudioIndicatorConfig {
@@ -285,7 +320,7 @@ impl Settings {
 
     pub fn should_show_process_info(&self, app_id: Option<&str>) -> bool {
         self.process_info.enabled
-            && app_id.map_or(false, |id| self.process_info.rules.contains_key(id))
+            && app_id.is_some_and(|id| self.process_info.rules.contains_key(id))
     }
 
     pub fn process_info_rule(&self, app_id: &str) -> Option<&TitleFormatRule> {

@@ -83,11 +83,11 @@ impl MonitorGeometry {
     }
 
     fn from_niri(logical: &LogicalOutput) -> Self {
-        let scale = logical.scale.ceil() as i32;
+        let scale = i32::try_from(logical.scale.ceil() as i64).unwrap_or(1);
 
         Self {
-            width: (logical.width as i32) * scale,
-            height: (logical.height as i32) * scale,
+            width: logical.width.cast_signed() * scale,
+            height: logical.height.cast_signed() * scale,
             x: logical.x * scale,
             y: logical.y * scale,
         }
@@ -96,8 +96,8 @@ impl MonitorGeometry {
 
 impl PartialEq for MonitorGeometry {
     fn eq(&self, other: &Self) -> bool {
-        let width_ratio = (self.width as f64) / (other.width as f64);
-        let height_ratio = (self.height as f64) / (other.height as f64);
+        let width_ratio = f64::from(self.width) / f64::from(other.width);
+        let height_ratio = f64::from(self.height) / f64::from(other.height);
 
         let width_diff = (width_ratio - 1.0).abs();
         let height_diff = (height_ratio - 1.0).abs();

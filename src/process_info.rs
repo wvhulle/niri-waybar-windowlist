@@ -14,33 +14,39 @@ pub struct ProcessInfo {
 
 impl ProcessInfo {
     #[tracing::instrument(level = "TRACE", err)]
-    pub async fn query(pid: i64) -> Result<Self, ProcessError> {
-        let stat_file = File::for_path(format!("/proc/{pid}/stat"));
+    pub async fn query(process_id: i64) -> Result<Self, ProcessError> {
+        let stat_file = File::for_path(format!("/proc/{process_id}/stat"));
 
         let mut reader = stat_file
             .read_future(Priority::DEFAULT)
             .await
-            .map_err(|e| ProcessError::FileOpen { e, pid })?
+            .map_err(|e| ProcessError::FileOpen { e, pid: process_id })?
             .into_async_buf_read(4096);
 
         let mut content = String::new();
         reader
             .read_to_string(&mut content)
             .await
-            .map_err(|e| ProcessError::FileRead { e, pid })?;
+            .map_err(|e| ProcessError::FileRead { e, pid: process_id })?;
 
-        let ppid_str = content
+        let parent_pid_str = content
             .split(' ')
             .nth(3)
-            .ok_or_else(|| ProcessError::MalformedStat { pid })?;
+            .ok_or_else(|| ProcessError::MalformedStat { pid: process_id })?;
 
-        let ppid = ppid_str.parse().map_err(|_| ProcessError::InvalidPpid {
-            value: ppid_str.to_owned(),
-            pid,
-        })?;
+        let parent_pid = parent_pid_str
+            .parse()
+            .map_err(|_| ProcessError::InvalidPpid {
+                value: parent_pid_str.to_owned(),
+                pid: process_id,
+            })?;
 
         Ok(Self {
-            parent_id: if ppid == 0 { None } else { Some(ppid) },
+            parent_id: if parent_pid == 0 {
+                None
+            } else {
+                Some(parent_pid)
+            },
         })
     }
 }
@@ -57,10 +63,10 @@ pub fn query_foreground(terminal_pid: u32) -> Result<ForegroundProcessInfo, Fore
 
     let shell_pids: Vec<i32> = terminal
         .tasks()?
-        .filter_map(|t| t.ok())
+        .filter_map(std::result::Result::ok)
         .flat_map(|task| task.children().unwrap_or_default())
         .filter_map(|child_pid| {
-            let child_pid = child_pid as i32;
+            let child_pid = child_pid.cast_signed();
             let child = Process::new(child_pid).ok()?;
             let stat = child.stat().ok()?;
             (stat.tty_nr != 0).then_some(child_pid)
@@ -110,12 +116,12 @@ fn find_process_in_group(pid: i32, target_pgrp: i32) -> Option<i32> {
     let children: Vec<u32> = proc
         .tasks()
         .ok()?
-        .filter_map(|t| t.ok())
+        .filter_map(std::result::Result::ok)
         .flat_map(|task| task.children().unwrap_or_default())
         .collect();
 
     children.into_iter().find_map(|child_pid| {
-        let child_pid = child_pid as i32;
+        let child_pid = child_pid.cast_signed();
         Process::new(child_pid)
             .ok()
             .and_then(|child| child.stat().ok())

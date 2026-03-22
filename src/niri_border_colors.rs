@@ -3,11 +3,10 @@ use std::path::PathBuf;
 use waybar_cffi::gtk::gdk;
 
 fn niri_config_path() -> PathBuf {
-    let config_home = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config")
-        });
+    let config_home = std::env::var_os("XDG_CONFIG_HOME").map_or_else(
+        || PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config"),
+        PathBuf::from,
+    );
     config_home.join("niri/config.kdl")
 }
 
@@ -16,9 +15,9 @@ fn parse_hex_color(hex: &str) -> Option<gdk::RGBA> {
     if hex.len() != 6 {
         return None;
     }
-    let r = u8::from_str_radix(&hex[0..2], 16).ok()? as f64 / 255.0;
-    let g = u8::from_str_radix(&hex[2..4], 16).ok()? as f64 / 255.0;
-    let b = u8::from_str_radix(&hex[4..6], 16).ok()? as f64 / 255.0;
+    let r = f64::from(u8::from_str_radix(&hex[0..2], 16).ok()?) / 255.0;
+    let g = f64::from(u8::from_str_radix(&hex[2..4], 16).ok()?) / 255.0;
+    let b = f64::from(u8::from_str_radix(&hex[4..6], 16).ok()?) / 255.0;
     Some(gdk::RGBA::new(r, g, b, 1.0))
 }
 
@@ -84,15 +83,15 @@ pub fn load_border_colors() -> BorderColors {
 /// urgent).
 fn default_active() -> IndicatorColor {
     IndicatorColor::Solid(gdk::RGBA::new(
-        0x7f as f64 / 255.0,
-        0xc8 as f64 / 255.0,
-        0xff as f64 / 255.0,
+        f64::from(0x7f) / 255.0,
+        f64::from(0xc8) / 255.0,
+        f64::from(0xff) / 255.0,
         1.0,
     ))
 }
 
 fn default_urgent() -> IndicatorColor {
-    IndicatorColor::Solid(gdk::RGBA::new(0x9b as f64 / 255.0, 0.0, 0.0, 1.0))
+    IndicatorColor::Solid(gdk::RGBA::new(f64::from(0x9b) / 255.0, 0.0, 0.0, 1.0))
 }
 
 fn parse_border_colors(content: &str) -> BorderColors {

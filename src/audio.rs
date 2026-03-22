@@ -158,7 +158,7 @@ fn build_audio_state(players: &HashMap<OwnedBusName, TrackedPlayer>) -> AudioSta
             .by_bus_suffix
             .entry(player.bus_suffix.clone())
             .and_modify(|existing| {
-                *existing = PlaybackStatus::most_active(*existing, player.status)
+                *existing = PlaybackStatus::most_active(*existing, player.status);
             })
             .or_insert(player.status);
 

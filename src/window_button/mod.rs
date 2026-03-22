@@ -1,5 +1,9 @@
+pub(crate) mod click_handlers;
+pub(crate) mod context_menu;
+
 use std::{
     cell::{Cell, RefCell},
+    collections::{BTreeMap, HashMap},
     fmt::Debug,
     path::PathBuf,
     rc::Rc,
@@ -13,14 +17,54 @@ use waybar_cffi::gtk::{
         BoxExt, Cast, ContainerExt, DragContextExtManual, EventBoxExt, GdkPixbufExt, IconThemeExt,
         LabelExt, WidgetExt, WidgetExtManual,
     },
-    DestDefaults, EventBox, IconLookupFlags, IconSize, IconTheme, Orientation, TargetEntry,
-    TargetFlags,
+    DestDefaults, EventBox, IconLookupFlags, IconSize, IconTheme, Orientation, StateFlags,
+    TargetEntry, TargetFlags,
 };
 
 use crate::{
-    taskbar::{set_background_color, FocusedWindow, SelectionState},
-    SharedState,
+    audio::PlaybackStatus, niri_border_colors::IndicatorColor, settings::ProcessInfoSource,
+    title_format, SharedState,
 };
+
+// ── Selection & Focus helpers (from taskbar.rs) ──
+
+pub fn set_background_color(
+    widget: &impl gtk::prelude::IsA<gtk::Widget>,
+    color: Option<&gdk::RGBA>,
+) {
+    unsafe {
+        gtk::ffi::gtk_widget_override_background_color(
+            gtk::prelude::Cast::upcast_ref::<gtk::Widget>(widget.as_ref())
+                .to_glib_none()
+                .0,
+            StateFlags::NORMAL.into_glib(),
+            color.map_or(std::ptr::null(), |c| c.to_glib_none().0),
+        );
+    }
+}
+
+use waybar_cffi::gtk::glib::translate::{IntoGlib, ToGlibPtr};
+
+pub type SelectionState = Rc<RefCell<HashMap<u64, gtk::EventBox>>>;
+
+pub fn create_selection_state() -> SelectionState {
+    Rc::new(RefCell::new(HashMap::new()))
+}
+
+pub fn clear_selection(selection: &SelectionState) {
+    let mut sel = selection.borrow_mut();
+    for (_, event_box) in sel.drain() {
+        set_background_color(&event_box, None);
+    }
+}
+
+pub type FocusedWindow = Rc<Cell<Option<u64>>>;
+
+pub fn create_focused_window() -> FocusedWindow {
+    Rc::new(Cell::new(None))
+}
+
+// ── WindowButton ──
 
 pub struct WindowButton {
     pub(crate) app_id: Option<String>,
@@ -38,7 +82,7 @@ pub struct WindowButton {
     pub(crate) focused_window: FocusedWindow,
     pub(crate) tooltip_timeout: Rc<RefCell<Option<gtk::glib::SourceId>>>,
     pub(crate) skip_clicked: Rc<RefCell<bool>>,
-    pub(crate) indicator_color: Rc<Cell<Option<crate::theme::IndicatorColor>>>,
+    pub(crate) indicator_color: Rc<Cell<Option<IndicatorColor>>>,
     pub(crate) is_urgent: Cell<bool>,
     pub(crate) process_info_enabled: bool,
 }
@@ -90,8 +134,7 @@ impl WindowButton {
         attrs.insert(gtk::pango::AttrInt::new_weight(gtk::pango::Weight::Normal));
         title_label.set_attributes(Some(&attrs));
 
-        let indicator_color: Rc<Cell<Option<crate::theme::IndicatorColor>>> =
-            Rc::new(Cell::new(None));
+        let indicator_color: Rc<Cell<Option<IndicatorColor>>> = Rc::new(Cell::new(None));
 
         let event_box = gtk::EventBox::new();
         event_box.set_visible_window(true);
@@ -244,6 +287,12 @@ impl WindowButton {
     fn setup_drag_reorder(&self) {
         tracing::info!("configuring drag-drop for window {}", self.window_id);
 
+        let initial_position = Rc::new(RefCell::new(0));
+        self.setup_drag_source(initial_position.clone());
+        self.setup_drag_destination(initial_position);
+    }
+
+    fn setup_drag_source(&self, initial_position: Rc<RefCell<i32>>) {
         let internal_targets = vec![TargetEntry::new("text/plain", TargetFlags::SAME_APP, 0)];
 
         self.event_box.drag_source_set(
@@ -252,20 +301,7 @@ impl WindowButton {
             gtk::gdk::DragAction::MOVE,
         );
 
-        let dest_targets = vec![
-            TargetEntry::new("text/plain", TargetFlags::SAME_APP, 0),
-            TargetEntry::new("text/uri-list", TargetFlags::OTHER_APP, 1),
-            TargetEntry::new("text/plain", TargetFlags::OTHER_APP, 2),
-        ];
-
-        self.event_box.drag_dest_set(
-            DestDefaults::MOTION | DestDefaults::HIGHLIGHT,
-            &dest_targets,
-            gtk::gdk::DragAction::MOVE | gtk::gdk::DragAction::COPY,
-        );
-
-        let initial_position = Rc::new(RefCell::new(0));
-        let pos_for_begin = initial_position.clone();
+        let pos_for_begin = initial_position;
 
         self.event_box.connect_drag_begin(move |widget, _| {
             tracing::info!("drag initiated");
@@ -295,6 +331,20 @@ impl WindowButton {
             set_background_color(&button_for_end, None);
             *skip_clicked_drag.borrow_mut() = false;
         });
+    }
+
+    fn setup_drag_destination(&self, initial_position: Rc<RefCell<i32>>) {
+        let dest_targets = vec![
+            TargetEntry::new("text/plain", TargetFlags::SAME_APP, 0),
+            TargetEntry::new("text/uri-list", TargetFlags::OTHER_APP, 1),
+            TargetEntry::new("text/plain", TargetFlags::OTHER_APP, 2),
+        ];
+
+        self.event_box.drag_dest_set(
+            DestDefaults::MOTION | DestDefaults::HIGHLIGHT,
+            &dest_targets,
+            gtk::gdk::DragAction::MOVE | gtk::gdk::DragAction::COPY,
+        );
 
         let hover_timeout: Rc<RefCell<Option<gtk::glib::SourceId>>> = Rc::new(RefCell::new(None));
         let timeout_for_motion = hover_timeout.clone();
@@ -321,7 +371,7 @@ impl WindowButton {
                         let timeout_ref = timeout_for_motion.clone();
 
                         let source_id = gtk::glib::timeout_add_local_once(
-                            Duration::from_millis(delay as u64),
+                            Duration::from_millis(u64::from(delay)),
                             move || {
                                 tracing::debug!("drag hover focus triggered for window {}", wid);
                                 if let Err(e) = state.compositor().focus_window(wid) {
@@ -368,7 +418,7 @@ impl WindowButton {
         });
 
         let state_for_drop = self.state.clone();
-        let pos_for_drop = initial_position.clone();
+        let pos_for_drop = initial_position;
         let settings_for_drop = self.state.settings().clone();
         self.event_box
             .connect_drag_drop(move |widget, ctx, _x, _y, time| {
@@ -557,14 +607,16 @@ impl WindowButton {
             let btn_clone = btn.clone();
             let timeout_ref = tooltip_timeout.clone();
 
-            let source_id =
-                gtk::glib::timeout_add_local_once(Duration::from_millis(delay as u64), move || {
+            let source_id = gtk::glib::timeout_add_local_once(
+                Duration::from_millis(u64::from(delay)),
+                move || {
                     if let Some(ref text) = *title_clone.borrow() {
                         btn_clone.set_tooltip_text(Some(text));
                         btn_clone.trigger_tooltip_query();
                     }
                     timeout_ref.borrow_mut().take();
-                });
+                },
+            );
 
             *tooltip_timeout.borrow_mut() = Some(source_id);
             gtk::glib::Propagation::Proceed
@@ -579,5 +631,170 @@ impl WindowButton {
             button_leave.set_tooltip_text(None);
             gtk::glib::Propagation::Proceed
         });
+    }
+
+    // ── Border indicator (from indicator.rs) ──
+
+    pub(crate) fn setup_border_indicator(
+        indicator_color: &Rc<Cell<Option<IndicatorColor>>>,
+        event_box: &gtk::EventBox,
+    ) {
+        let indicator_for_draw = indicator_color.clone();
+        event_box.connect_draw(move |widget, cr| {
+            if let Some(color) = indicator_for_draw.get() {
+                let w = f64::from(widget.allocation().width());
+                let h = 3.0;
+                match color {
+                    IndicatorColor::Solid(rgba) => {
+                        cr.set_source_rgba(rgba.red(), rgba.green(), rgba.blue(), rgba.alpha());
+                    }
+                    IndicatorColor::Gradient { from, to } => {
+                        let gradient = gtk::cairo::LinearGradient::new(0.0, 0.0, w, 0.0);
+                        gradient.add_color_stop_rgba(
+                            0.0,
+                            to.red(),
+                            to.green(),
+                            to.blue(),
+                            to.alpha(),
+                        );
+                        gradient.add_color_stop_rgba(
+                            0.5,
+                            from.red(),
+                            from.green(),
+                            from.blue(),
+                            from.alpha(),
+                        );
+                        gradient.add_color_stop_rgba(
+                            1.0,
+                            to.red(),
+                            to.green(),
+                            to.blue(),
+                            to.alpha(),
+                        );
+                        cr.set_source(&gradient).ok();
+                    }
+                }
+                cr.rectangle(0.0, 0.0, w, h);
+                cr.fill().ok();
+            }
+            gtk::glib::Propagation::Proceed
+        });
+    }
+
+    pub fn update_audio_state(&self, status: Option<PlaybackStatus>) {
+        if !self.state.settings().audio_indicator().enabled {
+            return;
+        }
+
+        match status {
+            None | Some(PlaybackStatus::Stopped) => {
+                self.audio_event_box.hide();
+            }
+            Some(PlaybackStatus::Playing) => {
+                let config = self.state.settings().audio_indicator();
+                self.audio_label.set_text(config.playing_icon.as_str());
+                self.audio_event_box.show();
+            }
+            Some(PlaybackStatus::Paused) => {
+                let config = self.state.settings().audio_indicator();
+                self.audio_label.set_text(config.muted_icon.as_str());
+                self.audio_event_box.show();
+            }
+        }
+    }
+
+    // ── Title methods (from title.rs) ──
+
+    #[tracing::instrument(level = "TRACE")]
+    pub fn update_title(&self, title: Option<&str>) {
+        if let Some(t) = title {
+            *self.title.borrow_mut() = Some(t.to_string());
+        }
+
+        if self.process_info_enabled {
+            let config = self.state.settings().process_info();
+            if config.source == ProcessInfoSource::TitleRegex {
+                if let Some(text) = title {
+                    let rule = self
+                        .app_id
+                        .as_deref()
+                        .and_then(|id| self.state.settings().process_info_rule(id));
+                    if let Some(rule) = rule {
+                        if let Some(caps) = rule.pattern.captures(text) {
+                            let capture_names: BTreeMap<&str, &str> = rule
+                                .pattern
+                                .capture_names()
+                                .flatten()
+                                .filter_map(|name| caps.name(name).map(|m| (name, m.as_str())))
+                                .collect();
+
+                            if let Some(markup) =
+                                title_format::render_with_rule(rule, &capture_names)
+                            {
+                                self.title_label.set_markup(&markup);
+                                self.title_label.show();
+                                return;
+                            }
+                        }
+                    }
+                }
+            } else {
+                return;
+            }
+        }
+
+        if self.display_titles {
+            if let Some(text) = title {
+                let display_text = if self.state.settings().allow_title_linebreaks() {
+                    text.to_string()
+                } else {
+                    text.replace(['\n', '\r'], " ")
+                };
+                self.title_label.set_text(&display_text);
+                self.title_label.show();
+            } else {
+                self.title_label.set_text("");
+                self.title_label.hide();
+            }
+        }
+    }
+
+    pub fn update_process_info(&self, cwd: Option<&str>, command: Option<&str>) {
+        if !self.display_titles {
+            return;
+        }
+
+        let rule = self
+            .app_id
+            .as_deref()
+            .and_then(|id| self.state.settings().process_info_rule(id));
+
+        if let Some(rule) = rule {
+            let mut captures = BTreeMap::new();
+            if let Some(c) = cwd {
+                captures.insert("cwd", c);
+            }
+            if let Some(c) = command {
+                captures.insert("cmd", c);
+            }
+
+            if captures.is_empty() {
+                let title = self.title.borrow();
+                self.title_label.set_text(title.as_deref().unwrap_or(""));
+                self.title_label.show();
+                return;
+            }
+
+            if let Some(markup) = title_format::render_with_rule(rule, &captures) {
+                self.title_label.set_markup(&markup);
+                self.title_label.show();
+                return;
+            }
+        }
+
+        // Fallback: show raw title
+        let title = self.title.borrow();
+        self.title_label.set_text(title.as_deref().unwrap_or(""));
+        self.title_label.show();
     }
 }

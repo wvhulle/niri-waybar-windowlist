@@ -53,7 +53,7 @@ async fn run_monitor_with_reconnect(tx: Sender<NotificationData>) {
             }
             Err(e) => {
                 tracing::warn!(%e, backoff_secs, "notification monitor error, reconnecting");
-                glib::timeout_future_seconds(backoff_secs as u32).await;
+                glib::timeout_future_seconds(u32::try_from(backoff_secs).unwrap_or(u32::MAX)).await;
                 backoff_secs = (backoff_secs * 2).min(MAX_BACKOFF_SECS);
             }
         }

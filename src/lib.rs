@@ -1,5 +1,4 @@
 use std::{
-    cell::Cell,
     collections::{BTreeMap, BTreeSet, HashMap},
     sync::{Arc, LazyLock, Mutex},
 };
@@ -20,32 +19,28 @@ use waybar_cffi::{
 };
 
 pub mod audio;
-mod button;
-mod click_actions;
 mod compositor;
-mod context_menu;
 mod event_stream;
-mod icons;
-mod indicator;
+mod icon_resolver;
+mod niri_border_colors;
 mod notifications;
+mod output_matching;
 mod process_info;
-mod screen;
 mod settings;
-mod taskbar;
-mod theme;
-mod title;
+mod title_format;
+mod window_button;
 
 use audio::AudioState;
-use button::WindowButton;
 use compositor::{CompositorClient, WindowInfo, WindowSnapshot};
 use event_stream::EventMessage;
-use icons::IconResolver;
+use icon_resolver::IconResolver;
+use niri_border_colors::BorderColors;
 use notifications::NotificationData;
 use process_info::ProcessInfo;
-use taskbar::{
+use window_button::{
     clear_selection, create_focused_window, create_selection_state, FocusedWindow, SelectionState,
+    WindowButton,
 };
-use theme::BorderColors;
 
 // ── Errors (inlined from errors.rs) ──
 
@@ -68,6 +63,7 @@ pub enum CompositorIpcError {
 }
 
 impl CompositorIpcError {
+    #[must_use]
     pub fn unexpected_response(expected: &'static str, actual: niri_ipc::Response) -> Self {
         Self::UnexpectedResponse {
             expected,
@@ -86,20 +82,17 @@ struct StateInner {
     settings: Settings,
     icon_resolver: IconResolver,
     compositor: CompositorClient,
-}
-
-thread_local! {
-    static BORDER_COLORS: Cell<BorderColors> = Cell::new(crate::theme::load_border_colors());
+    border_colors: Mutex<BorderColors>,
 }
 
 impl SharedState {
     fn create(settings: Settings) -> Self {
-        let colors = crate::theme::load_border_colors();
-        BORDER_COLORS.with(|cell| cell.set(colors));
+        let colors = crate::niri_border_colors::load_border_colors();
         Self(Arc::new(StateInner {
             compositor: CompositorClient::create(settings.clone()),
             icon_resolver: IconResolver::new(),
             settings,
+            border_colors: Mutex::new(colors),
         }))
     }
 
@@ -116,12 +109,20 @@ impl SharedState {
     }
 
     pub fn border_colors(&self) -> BorderColors {
-        BORDER_COLORS.with(|cell| cell.get())
+        *self
+            .0
+            .border_colors
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
     }
 
     pub fn reload_border_colors(&self) {
-        let colors = crate::theme::load_border_colors();
-        BORDER_COLORS.with(|cell| cell.set(colors));
+        let colors = crate::niri_border_colors::load_border_colors();
+        *self
+            .0
+            .border_colors
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = colors;
         tracing::info!("border colors reloaded");
     }
 }
@@ -140,7 +141,7 @@ static LOGGING: LazyLock<()> = LazyLock::new(|| {
     {
         Ok(f) => f,
         Err(e) => {
-            eprintln!("failed to open log file {log_path:?}: {e}");
+            eprintln!("failed to open log file {}: {e}", log_path.display());
             return;
         }
     };
@@ -196,9 +197,8 @@ impl Module for WindowButtonsModule {
         };
 
         let shared_state = SharedState::create(settings);
-        let context = MainContext::default();
 
-        if let Err(e) = context.block_on(initialize_module(info, shared_state, updater)) {
+        if let Err(e) = initialize_module(info, shared_state, updater) {
             tracing::error!(%e, "module initialization failed");
         }
 
@@ -208,7 +208,7 @@ impl Module for WindowButtonsModule {
 
 waybar_module!(WindowButtonsModule);
 
-async fn initialize_module(
+fn initialize_module(
     info: &waybar_cffi::InitInfo,
     state: SharedState,
     updater: WaybarUpdater,
@@ -225,7 +225,7 @@ async fn initialize_module(
     context.spawn_local(async move {
         ModuleInstance::create(state, container, updater)
             .run_event_loop()
-            .await
+            .await;
     });
 
     Ok(())
@@ -243,7 +243,7 @@ struct ModuleInstance {
     selection: SelectionState,
     focused_window: FocusedWindow,
     audio_state: AudioState,
-    _audio_monitor: Option<audio::AudioMonitor>,
+    audio_monitor_handle: Option<audio::AudioMonitor>,
     window_pids: HashMap<u64, u32>,
     updater: WaybarUpdater,
 }
@@ -260,7 +260,7 @@ impl ModuleInstance {
             selection: create_selection_state(),
             focused_window: create_focused_window(),
             audio_state: AudioState::default(),
-            _audio_monitor: None,
+            audio_monitor_handle: None,
             window_pids: HashMap::new(),
             updater,
         }
@@ -270,7 +270,7 @@ impl ModuleInstance {
         let display_filter = Arc::new(Mutex::new(self.determine_display_filter().await));
 
         let (stream, audio_monitor) = event_stream::create_event_stream(&self.state);
-        self._audio_monitor = audio_monitor;
+        self.audio_monitor_handle = audio_monitor;
         let mut event_stream = Box::pin(stream);
 
         while let Some(event) = event_stream.next().await {
@@ -279,7 +279,7 @@ impl ModuleInstance {
                 EventMessage::AudioUpdate(state) => self.handle_audio_update(state),
                 EventMessage::FullSnapshot(snapshot) => {
                     self.handle_window_update(snapshot, display_filter.clone())
-                        .await
+                        .await;
                 }
                 EventMessage::FocusChanged { old, new } => {
                     self.handle_focus_change(old, new);
@@ -297,7 +297,7 @@ impl ModuleInstance {
                         .values()
                         .for_each(|button| button.get_widget().queue_draw());
                 }
-                EventMessage::Workspaces(_) => {
+                EventMessage::Workspaces(()) => {
                     let updated_filter = self.determine_display_filter().await;
                     let filter_changed = {
                         let Ok(mut filter_lock) = display_filter.lock() else {
@@ -309,9 +309,10 @@ impl ModuleInstance {
                         changed
                     };
 
-                    if filter_changed && self.update_output_and_resize().await {
+                    if filter_changed && self.update_output_and_resize() {
                         if let Some(snapshot) = self.previous_snapshot.clone() {
-                            let filter = Arc::new(Mutex::new(screen::DisplayFilter::ShowAll));
+                            let filter =
+                                Arc::new(Mutex::new(output_matching::DisplayFilter::ShowAll));
                             self.handle_window_update(snapshot, filter).await;
                         }
                     }
@@ -320,7 +321,7 @@ impl ModuleInstance {
         }
     }
 
-    async fn update_output_and_resize(&mut self) -> bool {
+    fn update_output_and_resize(&mut self) -> bool {
         let new_output = self.get_current_output_name();
 
         if self.current_output.as_deref() != new_output.as_deref() {
@@ -336,64 +337,63 @@ impl ModuleInstance {
         let display = gdk_window.display();
         let monitor = display.monitor_at_window(&gdk_window)?;
 
-        let compositor = self.state.compositor().clone();
-        let outputs = compositor.query_outputs().ok()?;
+        let outputs = CompositorClient::query_outputs().ok()?;
 
         outputs.into_iter().find_map(|(output_name, output_info)| {
-            (screen::OutputMatcher::compare(&monitor, &output_info) == screen::OutputMatcher::all())
-                .then_some(output_name)
+            (output_matching::OutputMatcher::compare(&monitor, &output_info)
+                == output_matching::OutputMatcher::all())
+            .then_some(output_name)
         })
     }
 
     #[tracing::instrument(level = "DEBUG", skip(self))]
-    async fn determine_display_filter(&self) -> screen::DisplayFilter {
+    async fn determine_display_filter(&self) -> output_matching::DisplayFilter {
         if self.state.settings().show_all_outputs() {
-            return screen::DisplayFilter::ShowAll;
+            return output_matching::DisplayFilter::ShowAll;
         }
 
-        let compositor = self.state.compositor().clone();
-        let available_outputs = match gio::spawn_blocking(move || compositor.query_outputs()).await
-        {
+        let available_outputs = match gio::spawn_blocking(CompositorClient::query_outputs).await {
             Ok(Ok(outputs)) => outputs,
             Ok(Err(e)) => {
                 tracing::warn!(%e, "failed to query compositor outputs");
-                return screen::DisplayFilter::ShowAll;
+                return output_matching::DisplayFilter::ShowAll;
             }
             Err(_) => {
                 tracing::error!("task spawning error");
-                return screen::DisplayFilter::ShowAll;
+                return output_matching::DisplayFilter::ShowAll;
             }
         };
 
         if available_outputs.len() == 1 {
-            return screen::DisplayFilter::ShowAll;
+            return output_matching::DisplayFilter::ShowAll;
         }
 
         let Some(gdk_window) = self.container.window() else {
             tracing::warn!("container has no GDK window");
-            return screen::DisplayFilter::ShowAll;
+            return output_matching::DisplayFilter::ShowAll;
         };
 
         let display = gdk_window.display();
         let Some(monitor) = display.monitor_at_window(&gdk_window) else {
             tracing::warn!(display = ?gdk_window.display(), geometry = ?gdk_window.geometry(),
                 "no monitor found for window");
-            return screen::DisplayFilter::ShowAll;
+            return output_matching::DisplayFilter::ShowAll;
         };
 
         available_outputs
             .into_iter()
             .find_map(|(output_name, output_info)| {
-                (screen::OutputMatcher::compare(&monitor, &output_info)
-                    == screen::OutputMatcher::all())
-                .then(|| screen::DisplayFilter::Only(output_name))
+                (output_matching::OutputMatcher::compare(&monitor, &output_info)
+                    == output_matching::OutputMatcher::all())
+                .then_some(output_matching::DisplayFilter::Only(output_name))
             })
             .unwrap_or_else(|| {
                 tracing::warn!(?monitor, "no matching compositor output found");
-                screen::DisplayFilter::ShowAll
+                output_matching::DisplayFilter::ShowAll
             })
     }
 
+    #[allow(clippy::too_many_lines)]
     #[tracing::instrument(level = "TRACE", skip(self))]
     async fn handle_notification(&mut self, notification: Box<NotificationData>) {
         let Some(windows) = &self.previous_snapshot else {
@@ -470,7 +470,7 @@ impl ModuleInstance {
             .to_lowercase();
 
         let mut exact_match = false;
-        for window in windows.iter() {
+        for window in windows {
             let Some(app_identifier) = window.app_id.as_deref() else {
                 continue;
             };
@@ -514,9 +514,9 @@ impl ModuleInstance {
     async fn handle_window_update(
         &mut self,
         snapshot: WindowSnapshot,
-        filter: Arc<Mutex<screen::DisplayFilter>>,
+        filter: Arc<Mutex<output_matching::DisplayFilter>>,
     ) {
-        self.update_output_and_resize().await;
+        self.update_output_and_resize();
 
         let current_focused = snapshot.iter().find(|w| w.is_focused).map(|w| w.id);
         if current_focused != self.previous_focused {
@@ -528,10 +528,9 @@ impl ModuleInstance {
         let config = self.state.settings();
 
         for window in snapshot.iter().filter(|w| {
-            let should_display = filter
-                .lock()
-                .map(|f| f.should_display(w.get_output().unwrap_or_default()))
-                .unwrap_or(true);
+            let should_display = filter.lock().map_or(true, |f| {
+                f.should_display(w.get_output().unwrap_or_default())
+            });
             if !should_display {
                 return false;
             }
@@ -543,7 +542,7 @@ impl ModuleInstance {
             true
         }) {
             if let Some(pid) = window.pid {
-                self.window_pids.insert(window.id, pid as u32);
+                self.window_pids.insert(window.id, pid.cast_unsigned());
             }
 
             let button = self.buttons.entry(window.id).or_insert_with(|| {
@@ -621,7 +620,7 @@ impl ModuleInstance {
             .filter(|(wid, _)| {
                 self.buttons
                     .get(wid)
-                    .map_or(false, |b| b.process_info_enabled())
+                    .is_some_and(window_button::WindowButton::process_info_enabled)
             })
             .map(|(&wid, &pid)| (wid, pid))
             .collect();
@@ -651,7 +650,7 @@ impl ModuleInstance {
     }
 
     fn update_button_audio_states(&self) {
-        for (_window_id, button) in &self.buttons {
+        for button in self.buttons.values() {
             let status = button.app_id.as_deref().and_then(|app_id| {
                 let id_lower = app_id.to_lowercase();
                 self.audio_state

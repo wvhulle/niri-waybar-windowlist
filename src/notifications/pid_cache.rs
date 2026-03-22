@@ -146,7 +146,7 @@ async fn process_dbus_event(
                     .get_connection_unix_process_id(new_connection.clone().into())
                     .await
                 {
-                    storage.store(new_connection, Some(pid));
+                    storage.store(&new_connection, Some(pid));
                 }
             } else if let Some(old_connection) = args.old_owner.as_ref() {
                 storage.evict(old_connection);
@@ -172,7 +172,7 @@ async fn handle_cache_request(
                     .get_connection_unix_process_id(unique_name.into())
                     .await
                 {
-                    storage.store(connection, Some(pid));
+                    storage.store(&connection, Some(pid));
                     let _ = response.send(Some(pid));
                 }
             }
@@ -199,6 +199,7 @@ impl CacheStorage {
             .retain(|_, entry| entry.expires_at > current_time);
     }
 
+    #[allow(clippy::option_option)]
     fn retrieve(&mut self, connection: &str) -> Option<Option<u32>> {
         self.entries.get_mut(connection).map(|entry| {
             entry.expires_at = SystemTime::now() + self.ttl;
@@ -206,7 +207,7 @@ impl CacheStorage {
         })
     }
 
-    fn store(&mut self, connection: impl ToString, pid: Option<u32>) {
+    fn store(&mut self, connection: &impl ToString, pid: Option<u32>) {
         self.entries.insert(
             connection.to_string(),
             CacheEntry {

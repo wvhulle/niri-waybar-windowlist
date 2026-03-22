@@ -2,10 +2,7 @@ use std::collections::HashMap;
 
 use niri_ipc::{Action, Output, Request};
 
-use super::{
-    event_stream::NiriEventStream,
-    ipc::{send_request, validate_handled},
-};
+use super::{event_stream::NiriEventStream, send_request, validate_handled};
 use crate::{settings::Settings, CompositorIpcError};
 
 #[derive(Debug, Clone)]
@@ -283,7 +280,7 @@ impl CompositorClient {
         validate_handled(response)
     }
 
-    pub fn query_outputs(&self) -> Result<HashMap<String, Output>, CompositorIpcError> {
+    pub fn query_outputs() -> Result<HashMap<String, Output>, CompositorIpcError> {
         let response = send_request(Request::Outputs)?;
         match response {
             Ok(niri_ipc::Response::Outputs(outputs)) => Ok(outputs),
@@ -350,13 +347,16 @@ impl CompositorClient {
                 .iter()
                 .find(|w| w.id == window_id)
                 .and_then(|w| w.layout.pos_in_scrolling_layout)
-                .map(|(col, _)| col)
-                .unwrap_or(current_col)
+                .map_or(current_col, |(col, _)| col)
         } else {
             current_col
         };
 
-        let target_index = (effective_col as i32 + position_delta).max(1) as usize;
+        let target_index: usize = (i32::try_from(effective_col).unwrap_or(i32::MAX)
+            + position_delta)
+            .max(1)
+            .try_into()
+            .expect("target index is positive after .max(1)");
         tracing::trace!("moving column from {} to {}", effective_col, target_index);
 
         let response = send_request(Request::Action(Action::MoveColumnToIndex {

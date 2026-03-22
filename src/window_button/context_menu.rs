@@ -6,7 +6,8 @@ use waybar_cffi::gtk::{
     Menu, MenuItem,
 };
 
-use crate::{button::WindowButton, settings::ModifierKey, taskbar::clear_selection};
+use super::{clear_selection, WindowButton};
+use crate::settings::ModifierKey;
 
 impl WindowButton {
     #[tracing::instrument(level = "TRACE", skip(self))]
@@ -64,7 +65,7 @@ impl WindowButton {
                 if let Some(ref cmd) = command {
                     let windows_str = windows
                         .iter()
-                        .map(|w| w.to_string())
+                        .map(std::string::ToString::to_string)
                         .collect::<Vec<_>>()
                         .join(",");
                     let cmd = cmd.replace("{window_ids}", &windows_str);
@@ -98,13 +99,11 @@ impl WindowButton {
     }
 
     pub(crate) fn check_modifier_static(modifier: ModifierKey) -> bool {
-        let display = match gdk::Display::default() {
-            Some(d) => d,
-            None => return false,
+        let Some(display) = gdk::Display::default() else {
+            return false;
         };
-        let keymap = match gdk::Keymap::for_display(&display) {
-            Some(k) => k,
-            None => return false,
+        let Some(keymap) = gdk::Keymap::for_display(&display) else {
+            return false;
         };
         let state = gdk::ModifierType::from_bits_truncate(keymap.modifier_state());
         match modifier {
