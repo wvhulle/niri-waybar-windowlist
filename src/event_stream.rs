@@ -6,7 +6,6 @@ use crate::{
     audio,
     compositor::{CompositorEvent, NiriEventStream},
     notifications::{self, NotificationData},
-    settings::ProcessInfoSource,
     SharedState,
 };
 
@@ -14,7 +13,6 @@ pub enum EventMessage {
     Notification(Box<NotificationData>),
     FullSnapshot(crate::compositor::WindowSnapshot),
     FocusChanged { old: Option<u64>, new: Option<u64> },
-    WindowTitleChanged { id: u64, title: Option<String> },
     Workspaces(()),
     AudioUpdate(audio::AudioState),
     ProcessInfoTick,
@@ -48,10 +46,11 @@ pub fn create_event_stream(
         audio_monitor = Some(monitor);
     }
 
-    let pi = state.settings().process_info();
-    if pi.enabled && pi.source == ProcessInfoSource::Proc {
-        let interval = pi.poll_interval_ms;
-        glib::spawn_future_local(forward_process_info_ticks(tx.clone(), interval));
+    if let Some(interval_ms) = state.settings().proc_poll_interval() {
+        tracing::info!(interval_ms, "starting proc poll timer");
+        glib::spawn_future_local(forward_process_info_ticks(tx.clone(), interval_ms));
+    } else {
+        tracing::info!("proc polling disabled (no poll_proc rules)");
     }
 
     glib::spawn_future_local(forward_compositor_events(
@@ -80,29 +79,26 @@ async fn forward_notifications(tx: Sender<EventMessage>) {
     }
 }
 
+async fn forward_compositor_events(tx: Sender<EventMessage>, stream: NiriEventStream) {
+    while let Some(event) = stream.next().await {
+        let msg = match event {
+            CompositorEvent::FullSnapshot(snapshot) => EventMessage::FullSnapshot(snapshot),
+            CompositorEvent::FocusChanged { old, new } => EventMessage::FocusChanged { old, new },
+            CompositorEvent::Workspaces => EventMessage::Workspaces(()),
+            CompositorEvent::ConfigReloaded => EventMessage::ConfigReloaded,
+        };
+        if let Err(e) = tx.send(msg).await {
+            tracing::error!(%e, "failed to forward compositor event");
+        }
+    }
+}
+
 async fn forward_process_info_ticks(tx: Sender<EventMessage>, interval_ms: u64) {
     loop {
         glib::timeout_future(std::time::Duration::from_millis(interval_ms)).await;
         if let Err(e) = tx.send(EventMessage::ProcessInfoTick).await {
             tracing::error!(%e, "failed to forward process info tick");
             break;
-        }
-    }
-}
-
-async fn forward_compositor_events(tx: Sender<EventMessage>, stream: NiriEventStream) {
-    while let Some(event) = stream.next().await {
-        let msg = match event {
-            CompositorEvent::FullSnapshot(snapshot) => EventMessage::FullSnapshot(snapshot),
-            CompositorEvent::FocusChanged { old, new } => EventMessage::FocusChanged { old, new },
-            CompositorEvent::WindowTitleChanged { id, title } => {
-                EventMessage::WindowTitleChanged { id, title }
-            }
-            CompositorEvent::Workspaces => EventMessage::Workspaces(()),
-            CompositorEvent::ConfigReloaded => EventMessage::ConfigReloaded,
-        };
-        if let Err(e) = tx.send(msg).await {
-            tracing::error!(%e, "failed to forward compositor event");
         }
     }
 }

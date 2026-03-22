@@ -21,10 +21,7 @@ use waybar_cffi::gtk::{
     TargetEntry, TargetFlags,
 };
 
-use crate::{
-    audio::PlaybackStatus, niri_border_colors::IndicatorColor, settings::ProcessInfoSource,
-    title_format, SharedState,
-};
+use crate::{audio::PlaybackStatus, niri_border_colors::IndicatorColor, title_format, SharedState};
 
 // ── Selection & Focus helpers (from taskbar.rs) ──
 
@@ -84,7 +81,6 @@ pub struct WindowButton {
     pub(crate) skip_clicked: Rc<RefCell<bool>>,
     pub(crate) indicator_color: Rc<Cell<Option<IndicatorColor>>>,
     pub(crate) is_urgent: Cell<bool>,
-    pub(crate) process_info_enabled: bool,
 }
 
 impl Debug for WindowButton {
@@ -157,7 +153,6 @@ impl WindowButton {
         event_box.set_margin_bottom(0);
 
         let app_id = window.app_id.clone();
-        let process_info_enabled = state.settings().should_show_process_info(app_id.as_deref());
         let icon_location = app_id
             .as_deref()
             .and_then(|id| state_clone.icon_resolver().resolve(id));
@@ -189,7 +184,6 @@ impl WindowButton {
             skip_clicked: Rc::new(RefCell::new(false)),
             indicator_color,
             is_urgent: Cell::new(false),
-            process_info_enabled,
         };
 
         button.setup_click_handlers(window.id);
@@ -213,10 +207,6 @@ impl WindowButton {
             self.indicator_color.set(None);
         }
         self.event_box.queue_draw();
-    }
-
-    pub fn process_info_enabled(&self) -> bool {
-        self.process_info_enabled
     }
 
     #[tracing::instrument(level = "TRACE")]
@@ -258,7 +248,6 @@ impl WindowButton {
             skip_clicked: self.skip_clicked.clone(),
             indicator_color: self.indicator_color.clone(),
             is_urgent: Cell::new(self.is_urgent.get()),
-            process_info_enabled: self.process_info_enabled,
         }
     }
 
@@ -490,7 +479,6 @@ impl WindowButton {
 
     #[tracing::instrument(level = "TRACE")]
     fn setup_icon_rendering(&self, icon_path: Option<PathBuf>) {
-        let last_allocation = RefCell::new(None);
         let container = self.layout_box.clone();
         let label = self.title_label.clone();
         let audio_event_box = self.audio_event_box.clone();
@@ -498,78 +486,65 @@ impl WindowButton {
         let show_titles = self.display_titles;
         let icon_dimension = self.state.settings().icon_size();
 
+        // Pack label and audio immediately — they don't need the scale factor.
+        if show_titles {
+            container.pack_start(&label, true, true, 0);
+        }
+        container.pack_start(&audio_event_box, false, false, 0);
+
+        // Load and insert the icon once the widget is realized (so scale_factor is available).
+        let icon_inserted = Rc::new(Cell::new(false));
         self.event_box
-            .connect_size_allocate(move |button, allocation| {
-                let mut needs_render = container.children().is_empty();
-
-                if !needs_render {
-                    if let Some(prev_alloc) = last_allocation.take() {
-                        if &prev_alloc != allocation {
-                            needs_render = true;
-                        }
-                    } else {
-                        needs_render = true;
-                    }
-
-                    last_allocation.replace(Some(*allocation));
+            .connect_size_allocate(move |button, _allocation| {
+                if icon_inserted.get() {
+                    return;
                 }
+                icon_inserted.set(true);
+                tracing::info!("icon insertion triggered for size_allocate (one-time)");
 
-                if needs_render {
-                    let dimension = icon_dimension;
+                let dimension = icon_dimension;
 
-                    let icon_image = Self::load_icon_image(icon_path.as_ref(), button, dimension)
-                        .unwrap_or_else(|| {
-                            static FALLBACK: &str = "application-x-executable";
+                let icon_image = Self::load_icon_image(icon_path.as_ref(), button, dimension)
+                    .unwrap_or_else(|| {
+                        static FALLBACK: &str = "application-x-executable";
 
-                            ICON_THEME_INSTANCE
-                                .with(|theme| {
-                                    theme.lookup_icon_for_scale(
-                                        FALLBACK,
-                                        dimension,
-                                        button.scale_factor(),
-                                        IconLookupFlags::empty(),
-                                    )
-                                })
-                                .and_then(|info| {
-                                    Self::load_icon_image(
-                                        info.filename().as_ref(),
-                                        button,
-                                        dimension,
-                                    )
-                                })
-                                .unwrap_or_else(|| {
-                                    gtk::Image::from_icon_name(Some(FALLBACK), IconSize::Button)
-                                })
-                        });
-
-                    let container_copy = container.clone();
-                    let label_copy = label.clone();
-                    let audio_copy = audio_event_box.clone();
-                    let audio_vis = audio_visible.clone();
-                    let button_copy = button.clone();
-                    gtk::glib::source::idle_add_local_once(move || {
-                        for child in container_copy.children() {
-                            container_copy.remove(&child);
-                        }
-
-                        container_copy.pack_start(&icon_image, false, false, 0);
-
-                        if show_titles {
-                            container_copy.pack_start(&label_copy, true, true, 0);
-                        }
-
-                        container_copy.pack_start(&audio_copy, false, false, 0);
-
-                        container_copy.show_all();
-                        button_copy.show_all();
-
-                        // Restore audio indicator visibility after re-packing,
-                        // since no_show_all prevents show_all() from showing it.
-                        if audio_vis.get() {
-                            audio_copy.show();
-                        }
+                        ICON_THEME_INSTANCE
+                            .with(|theme| {
+                                theme.lookup_icon_for_scale(
+                                    FALLBACK,
+                                    dimension,
+                                    button.scale_factor(),
+                                    IconLookupFlags::empty(),
+                                )
+                            })
+                            .and_then(|info| {
+                                Self::load_icon_image(
+                                    info.filename().as_ref(),
+                                    button,
+                                    dimension,
+                                )
+                            })
+                            .unwrap_or_else(|| {
+                                gtk::Image::from_icon_name(Some(FALLBACK), IconSize::Button)
+                            })
                     });
-                }
+
+                // Insert icon at the front, before the label.
+                let container_copy = container.clone();
+                let audio_copy = audio_event_box.clone();
+                let audio_vis = audio_visible.clone();
+                let button_copy = button.clone();
+                gtk::glib::source::idle_add_local_once(move || {
+                    container_copy.pack_start(&icon_image, false, false, 0);
+                    container_copy.reorder_child(&icon_image, 0);
+
+                    container_copy.show_all();
+                    button_copy.show_all();
+
+                    if audio_vis.get() {
+                        audio_copy.show();
+                    }
+                });
             });
     }
 
@@ -703,43 +678,41 @@ impl WindowButton {
         }
     }
 
-    // ── Title methods (from title.rs) ──
+    // ── Title formatting ──
 
-    #[tracing::instrument(level = "TRACE")]
+    #[tracing::instrument(level = "INFO")]
     pub fn update_title(&self, title: Option<&str>) {
         if let Some(t) = title {
             *self.title.borrow_mut() = Some(t.to_string());
         }
 
-        if self.process_info_enabled {
-            let config = self.state.settings().process_info();
-            if config.source == ProcessInfoSource::TitleRegex {
-                if let Some(text) = title {
-                    let rule = self
-                        .app_id
-                        .as_deref()
-                        .and_then(|id| self.state.settings().process_info_rule(id));
-                    if let Some(rule) = rule {
-                        if let Some(caps) = rule.pattern.captures(text) {
-                            let capture_names: BTreeMap<&str, &str> = rule
-                                .pattern
-                                .capture_names()
-                                .flatten()
-                                .filter_map(|name| caps.name(name).map(|m| (name, m.as_str())))
-                                .collect();
+        if let Some(text) = title {
+            let rule = self
+                .app_id
+                .as_deref()
+                .and_then(|id| self.state.settings().title_format_rule(id));
 
-                            if let Some(markup) =
-                                title_format::render_with_rule(rule, &capture_names)
-                            {
-                                self.title_label.set_markup(&markup);
-                                self.title_label.show();
-                                return;
-                            }
-                        }
+            if let Some(rule) = rule {
+                if let Some(caps) = rule.pattern.captures(text) {
+                    let capture_names: BTreeMap<&str, &str> = rule
+                        .pattern
+                        .capture_names()
+                        .flatten()
+                        .filter_map(|name| caps.name(name).map(|m| (name, m.as_str())))
+                        .collect();
+
+                    if let Some(markup) = title_format::render_with_rule(rule, &capture_names) {
+                        tracing::info!(
+                            window_id = self.window_id,
+                            markup = %markup,
+                            has_parent = self.title_label.parent().is_some(),
+                            "set_markup on title label"
+                        );
+                        self.title_label.set_markup(&markup);
+                        self.title_label.show();
+                        return;
                     }
                 }
-            } else {
-                return;
             }
         }
 
@@ -750,15 +723,28 @@ impl WindowButton {
                 } else {
                     text.replace(['\n', '\r'], " ")
                 };
+                tracing::info!(
+                    window_id = self.window_id,
+                    display_text = %display_text,
+                    has_parent = self.title_label.parent().is_some(),
+                    "set_text on title label"
+                );
                 self.title_label.set_text(&display_text);
                 self.title_label.show();
             } else {
+                tracing::info!(window_id = self.window_id, "clearing title label");
                 self.title_label.set_text("");
                 self.title_label.hide();
             }
         }
     }
 
+    /// Update the title label using process info from `/proc` polling.
+    ///
+    /// Builds a capture map from `cwd` and `command`, then renders through
+    /// the title format rule template. Falls back to the raw title if no
+    /// rule matches or captures are empty.
+    #[tracing::instrument(level = "TRACE")]
     pub fn update_process_info(&self, cwd: Option<&str>, command: Option<&str>) {
         if !self.display_titles {
             return;
@@ -767,7 +753,7 @@ impl WindowButton {
         let rule = self
             .app_id
             .as_deref()
-            .and_then(|id| self.state.settings().process_info_rule(id));
+            .and_then(|id| self.state.settings().title_format_rule(id));
 
         if let Some(rule) = rule {
             let mut captures = BTreeMap::new();
@@ -792,7 +778,6 @@ impl WindowButton {
             }
         }
 
-        // Fallback: show raw title
         let title = self.title.borrow();
         self.title_label.set_text(title.as_deref().unwrap_or(""));
         self.title_label.show();

@@ -139,24 +139,8 @@ impl WindowTracker {
             self.focused_id = Some(window.id);
         }
 
-        let window_id = window.id;
-        let previous = windows.insert(window_id, window);
-
-        match previous {
-            None => self.maybe_full_snapshot(filter_workspace),
-            Some(prev) => {
-                if let Some(Ready { windows, .. }) = &self.state {
-                    let current = &windows[&window_id];
-                    if Self::only_title_differs(&prev, current) {
-                        return vec![CompositorEvent::WindowTitleChanged {
-                            id: prev.id,
-                            title: current.title.clone(),
-                        }];
-                    }
-                }
-                self.maybe_full_snapshot(filter_workspace)
-            }
-        }
+        windows.insert(window.id, window);
+        self.maybe_full_snapshot(filter_workspace)
     }
 
     fn handle_focus_changed(&mut self, id: Option<u64>) -> Vec<CompositorEvent> {
@@ -238,14 +222,6 @@ impl WindowTracker {
             }
         }
         self.maybe_full_snapshot(filter_workspace)
-    }
-
-    fn only_title_differs(prev: &niri_ipc::Window, current: &niri_ipc::Window) -> bool {
-        prev.title != current.title
-            && prev.is_urgent == current.is_urgent
-            && prev.is_focused == current.is_focused
-            && prev.workspace_id == current.workspace_id
-            && prev.app_id == current.app_id
     }
 
     fn record_last_focused(

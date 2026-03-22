@@ -1,12 +1,12 @@
 mod click_actions;
-mod process_info;
+mod title_format;
 
 use std::collections::HashMap;
 
 pub use click_actions::*;
-pub use process_info::*;
 use regex::Regex;
 use serde::{Deserialize, Deserializer};
+pub use title_format::*;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
@@ -21,7 +21,7 @@ pub struct Settings {
     multi_select_modifier: ModifierKey,
     multi_select_menu: Vec<MultiSelectMenuItem>,
     audio_indicator: AudioIndicatorConfig,
-    process_info: ProcessInfoConfig,
+    title_format: TitleFormatConfig,
     #[serde(flatten)]
     display: DisplayConfig,
     #[serde(flatten)]
@@ -97,7 +97,7 @@ impl Default for Settings {
             multi_select_modifier: ModifierKey::Ctrl,
             multi_select_menu: default_multi_select_menu(),
             audio_indicator: AudioIndicatorConfig::default(),
-            process_info: ProcessInfoConfig::default(),
+            title_format: TitleFormatConfig::default(),
             display: DisplayConfig::default(),
             tooltip: TooltipConfig::default(),
             drag: DragConfig::default(),
@@ -314,16 +314,33 @@ impl Settings {
         &self.audio_indicator
     }
 
-    pub fn process_info(&self) -> &ProcessInfoConfig {
-        &self.process_info
+    pub fn title_format_rule(&self, app_id: &str) -> Option<&TitleFormatRule> {
+        if self.title_format.enabled {
+            self.title_format.rules.get(app_id)
+        } else {
+            None
+        }
     }
 
-    pub fn should_show_process_info(&self, app_id: Option<&str>) -> bool {
-        self.process_info.enabled
-            && app_id.is_some_and(|id| self.process_info.rules.contains_key(id))
+    /// Returns `true` if this `app_id` has a title format rule with `poll_proc` enabled.
+    pub fn should_poll_proc(&self, app_id: Option<&str>) -> bool {
+        self.title_format.enabled
+            && app_id.is_some_and(|id| {
+                self.title_format
+                    .rules
+                    .get(id)
+                    .is_some_and(|rule| rule.poll_proc)
+            })
     }
 
-    pub fn process_info_rule(&self, app_id: &str) -> Option<&TitleFormatRule> {
-        self.process_info.rules.get(app_id)
+    /// Returns the proc poll interval if any rule has `poll_proc` enabled.
+    pub fn proc_poll_interval(&self) -> Option<u64> {
+        if self.title_format.enabled
+            && self.title_format.rules.values().any(|rule| rule.poll_proc)
+        {
+            Some(self.title_format.poll_interval_ms)
+        } else {
+            None
+        }
     }
 }

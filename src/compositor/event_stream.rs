@@ -7,7 +7,6 @@ use crate::CompositorIpcError;
 pub enum CompositorEvent {
     FullSnapshot(WindowSnapshot),
     FocusChanged { old: Option<u64>, new: Option<u64> },
-    WindowTitleChanged { id: u64, title: Option<String> },
     Workspaces,
     ConfigReloaded,
 }

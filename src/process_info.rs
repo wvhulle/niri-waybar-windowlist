@@ -56,6 +56,10 @@ pub struct ForegroundProcessInfo {
     pub command: Option<String>,
 }
 
+/// Query the foreground process of a terminal window identified by `terminal_pid`.
+///
+/// Walks the process tree to find the foreground process group leader,
+/// then reads its cwd and command name.
 pub fn query_foreground(terminal_pid: u32) -> Result<ForegroundProcessInfo, ForegroundError> {
     let pid = i32::try_from(terminal_pid)
         .map_err(|_| ForegroundError::InvalidPid { pid: terminal_pid })?;
@@ -63,7 +67,7 @@ pub fn query_foreground(terminal_pid: u32) -> Result<ForegroundProcessInfo, Fore
 
     let shell_pids: Vec<i32> = terminal
         .tasks()?
-        .filter_map(std::result::Result::ok)
+        .filter_map(Result::ok)
         .flat_map(|task| task.children().unwrap_or_default())
         .filter_map(|child_pid| {
             let child_pid = child_pid.cast_signed();
@@ -112,11 +116,11 @@ fn find_foreground_pid(shell_pids: &[i32]) -> Option<i32> {
 }
 
 fn find_process_in_group(pid: i32, target_pgrp: i32) -> Option<i32> {
-    let proc = Process::new(pid).ok()?;
-    let children: Vec<u32> = proc
+    let proc_entry = Process::new(pid).ok()?;
+    let children: Vec<u32> = proc_entry
         .tasks()
         .ok()?
-        .filter_map(std::result::Result::ok)
+        .filter_map(Result::ok)
         .flat_map(|task| task.children().unwrap_or_default())
         .collect();
 

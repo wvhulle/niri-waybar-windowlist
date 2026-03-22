@@ -277,18 +277,13 @@ impl ModuleInstance {
             match event {
                 EventMessage::Notification(notif) => self.handle_notification(notif).await,
                 EventMessage::AudioUpdate(state) => self.handle_audio_update(state),
+                EventMessage::ProcessInfoTick => self.handle_process_info_tick(),
                 EventMessage::FullSnapshot(snapshot) => {
                     self.handle_window_update(snapshot, display_filter.clone())
                         .await;
                 }
                 EventMessage::FocusChanged { old, new } => {
                     self.handle_focus_change(old, new);
-                }
-                EventMessage::WindowTitleChanged { id, title } => {
-                    self.handle_window_title_update(id, title.as_deref());
-                }
-                EventMessage::ProcessInfoTick => {
-                    self.handle_process_info_tick();
                 }
                 EventMessage::ConfigReloaded => {
                     tracing::info!("config reloaded, refreshing border colors");
@@ -558,6 +553,7 @@ impl ModuleInstance {
 
             button.update_focus(window.is_focused);
             button.update_urgent(window.is_urgent);
+            tracing::info!(window_id = window.id, title = ?window.title, "updating button title");
             button.update_title(window.title.as_deref());
 
             removed_windows.remove(&window.id);
@@ -603,38 +599,52 @@ impl ModuleInstance {
         self.update_button_audio_states();
     }
 
-    #[tracing::instrument(level = "INFO", skip(self))]
-    fn handle_window_title_update(&mut self, id: u64, title: Option<&str>) {
-        if let Some(button) = self.buttons.get(&id) {
-            button.update_title(title);
-            self.updater.queue_update();
-        }
+    fn handle_audio_update(&mut self, state: AudioState) {
+        self.audio_state = state;
+        self.update_button_audio_states();
     }
 
     fn handle_process_info_tick(&mut self) {
         let mut any_changed = false;
 
-        let pids_to_query: Vec<_> = self
+        let pollable: Vec<_> = self
             .window_pids
             .iter()
             .filter(|(wid, _)| {
                 self.buttons
                     .get(wid)
-                    .is_some_and(window_button::WindowButton::process_info_enabled)
+                    .is_some_and(|b| self.state.settings().should_poll_proc(b.app_id.as_deref()))
             })
             .map(|(&wid, &pid)| (wid, pid))
             .collect();
 
+        // Count how many windows share each PID. When multiple windows
+        // report the same PID (e.g. kitty), `/proc` polling returns
+        // identical results for all of them, overwriting the correct
+        // per-window titles that the compositor provides.
+        let mut pid_refcount: HashMap<u32, usize> = HashMap::new();
+        for &(_, pid) in &pollable {
+            *pid_refcount.entry(pid).or_default() += 1;
+        }
+
+        let pids_to_query: Vec<_> = pollable
+            .into_iter()
+            .filter(|&(_, pid)| pid_refcount.get(&pid).copied().unwrap_or(0) == 1)
+            .collect();
+
+        tracing::debug!(count = pids_to_query.len(), "process info tick");
+
         for (wid, pid) in pids_to_query {
             match process_info::query_foreground(pid) {
                 Ok(info) => {
+                    tracing::debug!(window_id = wid, pid, cwd = ?info.cwd, cmd = ?info.command, "proc query result");
                     if let Some(button) = self.buttons.get(&wid) {
                         button.update_process_info(info.cwd.as_deref(), info.command.as_deref());
                         any_changed = true;
                     }
                 }
                 Err(e) => {
-                    tracing::debug!(window_id = wid, %e, "process info query failed");
+                    tracing::debug!(window_id = wid, pid, %e, "process info query failed");
                 }
             }
         }
@@ -642,11 +652,6 @@ impl ModuleInstance {
         if any_changed {
             self.updater.queue_update();
         }
-    }
-
-    fn handle_audio_update(&mut self, state: AudioState) {
-        self.audio_state = state;
-        self.update_button_audio_states();
     }
 
     fn update_button_audio_states(&self) {
