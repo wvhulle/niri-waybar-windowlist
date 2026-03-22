@@ -285,12 +285,10 @@ impl Settings {
 
     pub fn should_show_process_info(&self, app_id: Option<&str>) -> bool {
         self.process_info.enabled
-            && app_id.map_or(false, |id| {
-                self.process_info.title_patterns.contains_key(id)
-            })
+            && app_id.map_or(false, |id| self.process_info.rules.contains_key(id))
     }
 
-    pub fn process_info_pattern(&self, app_id: &str) -> Option<&Regex> {
-        self.process_info.title_patterns.get(app_id)
+    pub fn process_info_rule(&self, app_id: &str) -> Option<&TitleFormatRule> {
+        self.process_info.rules.get(app_id)
     }
 }

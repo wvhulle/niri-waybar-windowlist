@@ -1,57 +1,47 @@
-use waybar_cffi::gtk::{
-    self as gtk,
-    prelude::{LabelExt, WidgetExt},
-};
+use std::collections::BTreeMap;
+
+use minijinja::{AutoEscape, Environment};
+use waybar_cffi::gtk::prelude::{LabelExt, WidgetExt};
 
 use crate::{
     button::WindowButton,
-    settings::{FontStyle, ProcessInfoLayout, ProcessInfoSource},
+    settings::{ProcessInfoSource, TitleFormatRule},
 };
 
-fn font_style_to_pango(style: FontStyle) -> (gtk::pango::Weight, gtk::pango::Style) {
-    match style {
-        FontStyle::Normal => (gtk::pango::Weight::Normal, gtk::pango::Style::Normal),
-        FontStyle::Italic => (gtk::pango::Weight::Normal, gtk::pango::Style::Italic),
-        FontStyle::Bold => (gtk::pango::Weight::Bold, gtk::pango::Style::Normal),
-        FontStyle::BoldItalic => (gtk::pango::Weight::Bold, gtk::pango::Style::Italic),
-    }
-}
-
-fn apply_styled_range(attrs: &gtk::pango::AttrList, style: FontStyle, start: u32, end: u32) {
-    let (weight, pango_style) = font_style_to_pango(style);
-    let mut w = gtk::pango::AttrInt::new_weight(weight);
-    w.set_start_index(start);
-    w.set_end_index(end);
-    attrs.insert(w);
-    let mut s = gtk::pango::AttrInt::new_style(pango_style);
-    s.set_start_index(start);
-    s.set_end_index(end);
-    attrs.insert(s);
-}
-
-fn format_cwd(raw: &str, shorten_home: bool, basename_only: bool) -> String {
-    let path = if shorten_home {
-        dirs::home_dir()
-            .filter(|home| raw.starts_with(&*home.to_string_lossy()))
-            .map(|home| format!("~{}", &raw[home.to_string_lossy().len()..]))
-            .unwrap_or_else(|| raw.to_string())
-    } else {
-        raw.to_string()
-    };
-    if basename_only {
+fn create_template_env() -> Environment<'static> {
+    let mut env = Environment::new();
+    env.set_auto_escape_callback(|_| AutoEscape::Html);
+    env.add_filter("basename", |path: String| -> String {
         std::path::Path::new(&path)
             .file_name()
             .map_or(path.clone(), |n| n.to_string_lossy().into_owned())
-    } else {
-        path
-    }
+    });
+    env.add_filter("shorten_home", |path: String| -> String {
+        dirs::home_dir()
+            .filter(|home| path.starts_with(&*home.to_string_lossy()))
+            .map(|home| format!("~{}", &path[home.to_string_lossy().len()..]))
+            .unwrap_or(path)
+    });
+    env
 }
 
-fn set_plain_title(label: &gtk::Label, text: &str) {
-    label.set_text(text);
-    let attrs = gtk::pango::AttrList::new();
-    attrs.insert(gtk::pango::AttrInt::new_weight(gtk::pango::Weight::Normal));
-    label.set_attributes(Some(&attrs));
+thread_local! {
+    static TEMPLATE_ENV: Environment<'static> = create_template_env();
+}
+
+fn render_with_rule(
+    rule: &TitleFormatRule,
+    captures: &BTreeMap<&str, &str>,
+) -> Option<String> {
+    TEMPLATE_ENV.with(|env| {
+        match env.render_str(&rule.format, minijinja::context! { ..minijinja::Value::from_serialize(captures) }) {
+            Ok(rendered) => Some(rendered),
+            Err(e) => {
+                tracing::warn!(%e, "template render failed");
+                None
+            }
+        }
+    })
 }
 
 impl WindowButton {
@@ -65,16 +55,26 @@ impl WindowButton {
             let config = self.state.settings().process_info();
             if config.source == ProcessInfoSource::TitleRegex {
                 if let Some(text) = title {
-                    let pattern = self
+                    let rule = self
                         .app_id
                         .as_deref()
-                        .and_then(|id| self.state.settings().process_info_pattern(id));
-                    if let Some(re) = pattern {
-                        if let Some(caps) = re.captures(text) {
-                            let cwd = caps.name("cwd").map(|m| m.as_str());
-                            let cmd = caps.name("cmd").map(|m| m.as_str());
-                            self.update_process_info(cwd, cmd);
-                            return;
+                        .and_then(|id| self.state.settings().process_info_rule(id));
+                    if let Some(rule) = rule {
+                        if let Some(caps) = rule.pattern.captures(text) {
+                            let capture_names: BTreeMap<&str, &str> = rule
+                                .pattern
+                                .capture_names()
+                                .flatten()
+                                .filter_map(|name| {
+                                    caps.name(name).map(|m| (name, m.as_str()))
+                                })
+                                .collect();
+
+                            if let Some(markup) = render_with_rule(rule, &capture_names) {
+                                self.title_label.set_markup(&markup);
+                                self.title_label.show();
+                                return;
+                            }
                         }
                     }
                 }
@@ -88,7 +88,7 @@ impl WindowButton {
                 let display_text = if self.state.settings().allow_title_linebreaks() {
                     text.to_string()
                 } else {
-                    text.replace('\n', " ").replace('\r', " ")
+                    text.replace(['\n', '\r'], " ")
                 };
                 self.title_label.set_text(&display_text);
                 self.title_label.show();
@@ -104,53 +104,37 @@ impl WindowButton {
             return;
         }
 
-        let config = self.state.settings().process_info();
+        let rule = self
+            .app_id
+            .as_deref()
+            .and_then(|id| self.state.settings().process_info_rule(id));
 
-        let formatted_cwd =
-            cwd.map(|c| format_cwd(c, config.shorten_home, config.show_basename_only));
+        if let Some(rule) = rule {
+            let mut captures = BTreeMap::new();
+            if let Some(c) = cwd {
+                captures.insert("cwd", c);
+            }
+            if let Some(c) = command {
+                captures.insert("cmd", c);
+            }
 
-        if formatted_cwd.is_none() && command.is_none() {
-            let title = self.title.borrow();
-            set_plain_title(&self.title_label, title.as_deref().unwrap_or(""));
-            return;
+            if captures.is_empty() {
+                let title = self.title.borrow();
+                self.title_label.set_text(title.as_deref().unwrap_or(""));
+                self.title_label.show();
+                return;
+            }
+
+            if let Some(markup) = render_with_rule(rule, &captures) {
+                self.title_label.set_markup(&markup);
+                self.title_label.show();
+                return;
+            }
         }
 
-        let cwd_part = formatted_cwd.as_deref().unwrap_or("");
-        let cmd_part = command.unwrap_or("");
-
-        let separator = match config.layout {
-            ProcessInfoLayout::SingleLine => &config.separator,
-            ProcessInfoLayout::TwoLines => "\n",
-        };
-
-        let text = if !cwd_part.is_empty() && !cmd_part.is_empty() {
-            format!("{cwd_part}{separator}{cmd_part}")
-        } else if !cwd_part.is_empty() {
-            cwd_part.to_string()
-        } else {
-            cmd_part.to_string()
-        };
-
-        self.title_label.set_text(&text);
-
-        let attrs = gtk::pango::AttrList::new();
-        let cwd_len = cwd_part.len() as u32;
-        let sep_len = if !cwd_part.is_empty() && !cmd_part.is_empty() {
-            separator.len() as u32
-        } else {
-            0
-        };
-        let cmd_start = cwd_len + sep_len;
-        let cmd_end = text.len() as u32;
-
-        if cwd_len > 0 {
-            apply_styled_range(&attrs, config.cwd_font_style, 0, cwd_len);
-        }
-        if cmd_start < cmd_end {
-            apply_styled_range(&attrs, config.cmd_font_style, cmd_start, cmd_end);
-        }
-
-        self.title_label.set_attributes(Some(&attrs));
+        // Fallback: show raw title
+        let title = self.title.borrow();
+        self.title_label.set_text(title.as_deref().unwrap_or(""));
         self.title_label.show();
     }
 }
