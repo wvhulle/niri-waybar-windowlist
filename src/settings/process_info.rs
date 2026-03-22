@@ -46,18 +46,6 @@ where
     Regex::new(&pattern).map_err(serde::de::Error::custom)
 }
 
-fn deserialize_rules_with_defaults<'de, D>(
-    deserializer: D,
-) -> Result<HashMap<String, TitleFormatRule>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let user_rules: HashMap<String, TitleFormatRule> = HashMap::deserialize(deserializer)?;
-    let mut merged = default_rules();
-    merged.extend(user_rules);
-    Ok(merged)
-}
-
 fn rule(pattern: &str, format: &str) -> TitleFormatRule {
     TitleFormatRule {
         pattern: Regex::new(pattern).expect("builtin pattern is valid"),
@@ -70,9 +58,15 @@ fn default_rules() -> HashMap<String, TitleFormatRule> {
     let terminal_format =
         "<i>{{ cwd | shorten_home }}</i>{% if cmd %} · {{ cmd }}{% endif %}";
 
-    // "Page Title — Site Name" or "Page Title - Site Name"
-    let browser_pattern = r"^(?P<page>.+?)(?:\s[—-]\s(?P<site>.+))?$";
-    let browser_format =
+    // Firefox: "Page · Site — Mozilla Firefox" or "Page — Mozilla Firefox" or "Page"
+    // Uses em-dash only to avoid mismatching hyphens in page titles
+    let firefox_pattern = r"^(?P<page>.+?)(?:\s·\s(?P<site>.+?))?\s—\s.+$|^(?P<page>.+)$";
+    let firefox_format =
+        "{% if site %}<i>{{ site }}</i> · {% endif %}{{ page }}";
+
+    // Chromium: "Page Title - Browser Name"
+    let chromium_pattern = r"^(?P<page>.+)\s-\s(?P<site>.+)$|^(?P<page>.+)$";
+    let chromium_format =
         "{{ page }}{% if site %} <span alpha='60%'>— {{ site }}</span>{% endif %}";
 
     // "filename - Editor Name" or "filename · Editor Name"
@@ -89,10 +83,10 @@ fn default_rules() -> HashMap<String, TitleFormatRule> {
         ("ghostty", rule(terminal_pattern, terminal_format)),
         ("org.wezfurlong.wezterm", rule(terminal_pattern, terminal_format)),
         // Browsers
-        ("firefox", rule(browser_pattern, browser_format)),
-        ("chromium-browser", rule(browser_pattern, browser_format)),
-        ("google-chrome", rule(browser_pattern, browser_format)),
-        ("brave-browser", rule(browser_pattern, browser_format)),
+        ("firefox", rule(firefox_pattern, firefox_format)),
+        ("chromium-browser", rule(chromium_pattern, chromium_format)),
+        ("google-chrome", rule(chromium_pattern, chromium_format)),
+        ("brave-browser", rule(chromium_pattern, chromium_format)),
         // Editors
         ("code", rule(editor_pattern, editor_format)),
         ("Code", rule(editor_pattern, editor_format)),
