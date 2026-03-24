@@ -39,7 +39,7 @@ fn terminal_rule(pattern: &str, format: &str) -> TitleFormatRule {
 }
 
 pub fn default_rules() -> HashMap<String, TitleFormatRule> {
-    let terminal_pattern = r"^(?P<cwd>.+?)(?:\s-\s(?P<cmd>.+))?$";
+    let terminal_pattern = r"^(?P<cwd>.+?)(?:(?:\s-\s|>\s?)(?P<cmd>.+))?$";
     let terminal_format = "<i>{{ cwd | shorten_home }}</i>{% if cmd %} · {{ cmd }}{% endif %}";
 
     // Firefox: "Page · Site — Mozilla Firefox" or "Page — Mozilla Firefox"
