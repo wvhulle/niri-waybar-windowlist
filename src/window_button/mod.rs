@@ -13,7 +13,7 @@ use waybar_cffi::gtk::{
     self as gtk, gdk,
     glib::SourceId,
     pango::{AttrInt, AttrList, EllipsizeMode, Weight},
-    prelude::{BoxExt, ContainerExt, EventBoxExt, LabelExt, WidgetExt, WidgetExtManual},
+    prelude::{ContainerExt, EventBoxExt, LabelExt, WidgetExt, WidgetExtManual},
     EventBox, Orientation,
 };
 
@@ -23,8 +23,8 @@ use crate::{
     mpris_indicator::{style::update_audio_state, PlaybackStatus},
     niri::border_colors::IndicatorColor,
     notification_bubble::style::{
-        clear_notification_urgent, create_notification_bubble, mark_notification_urgent,
-        NotificationUrgency,
+        clear_notification_urgent, mark_notification_urgent, setup_notification_bubble,
+        BubbleState, NotificationUrgency,
     },
     window_list::{FocusedWindow, SelectionState},
     window_title::style::{update_process_info, update_title},
@@ -49,9 +49,7 @@ pub struct WindowButton {
     pub(crate) skip_clicked: Rc<RefCell<bool>>,
     pub(crate) indicator_color: Rc<Cell<Option<IndicatorColor>>>,
     pub(crate) window_urgency: Cell<bool>,
-    pub(crate) notification_urgency: Cell<bool>,
-    pub(crate) notification_bubble: gtk::DrawingArea,
-    pub(crate) bubble_urgency: Rc<Cell<NotificationUrgency>>,
+    pub(crate) bubble_state: Rc<BubbleState>,
 }
 
 impl Debug for WindowButton {
@@ -98,9 +96,10 @@ impl WindowButton {
         title_label.set_attributes(Some(&attrs));
 
         let indicator_color: Rc<Cell<Option<IndicatorColor>>> = Rc::new(Cell::new(None));
-        let bubble_urgency: Rc<Cell<NotificationUrgency>> =
-            Rc::new(Cell::new(NotificationUrgency::default()));
-        let notification_bubble = create_notification_bubble(bubble_urgency.clone());
+        let bubble_state = Rc::new(BubbleState {
+            active: Cell::new(false),
+            urgency: Cell::new(NotificationUrgency::default()),
+        });
 
         let event_box = gtk::EventBox::new();
         event_box.set_visible_window(true);
@@ -108,6 +107,7 @@ impl WindowButton {
         event_box.add(&layout_box);
 
         setup_border_indicator(&indicator_color, &event_box);
+        setup_notification_bubble(&bubble_state, &event_box, Default::default());
         event_box.add_events(
             gdk::EventMask::BUTTON_PRESS_MASK
                 | gdk::EventMask::BUTTON_RELEASE_MASK
@@ -154,9 +154,7 @@ impl WindowButton {
             skip_clicked: Rc::new(RefCell::new(false)),
             indicator_color,
             window_urgency: Cell::new(false),
-            notification_urgency: Cell::new(false),
-            notification_bubble,
-            bubble_urgency,
+            bubble_state,
         };
 
         button.setup_click_handlers(window.id);
@@ -174,9 +172,6 @@ impl WindowButton {
                 icon_path: icon_location,
             },
         );
-        button
-            .layout_box
-            .pack_end(&button.notification_bubble, false, false, 0);
         button.setup_tooltip();
 
         button
@@ -185,7 +180,7 @@ impl WindowButton {
     #[tracing::instrument(level = "TRACE")]
     pub fn update_focus(&self, is_focused: bool) {
         if is_focused {
-            clear_notification_urgent(&self.notification_bubble, &self.notification_urgency);
+            clear_notification_urgent(&self.event_box, &self.bubble_state);
         }
         let colors = *self.state.border_colors.lock().unwrap();
         update_focus(
@@ -201,12 +196,7 @@ impl WindowButton {
 
     #[tracing::instrument(level = "TRACE")]
     pub fn mark_notification_urgent(&self, urgency: NotificationUrgency) {
-        mark_notification_urgent(
-            &self.notification_bubble,
-            &self.notification_urgency,
-            &self.bubble_urgency,
-            urgency,
-        );
+        mark_notification_urgent(&self.event_box, &self.bubble_state, urgency);
     }
 
     #[tracing::instrument(level = "TRACE")]
@@ -244,9 +234,7 @@ impl WindowButton {
             skip_clicked: self.skip_clicked.clone(),
             indicator_color: self.indicator_color.clone(),
             window_urgency: Cell::new(self.window_urgency.get()),
-            notification_urgency: Cell::new(self.notification_urgency.get()),
-            notification_bubble: self.notification_bubble.clone(),
-            bubble_urgency: self.bubble_urgency.clone(),
+            bubble_state: self.bubble_state.clone(),
         }
     }
 

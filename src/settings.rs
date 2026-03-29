@@ -148,21 +148,6 @@ impl Settings {
         self.notifications.enabled
     }
 
-    pub fn notifications_app_map(&self, app_id: &str) -> Option<&str> {
-        self.notifications
-            .map_app_ids
-            .get(app_id)
-            .map(String::as_str)
-    }
-
-    pub fn notifications_use_desktop_entry(&self) -> bool {
-        self.notifications.use_desktop_entry
-    }
-
-    pub fn notifications_use_fuzzy_matching(&self) -> bool {
-        self.notifications.use_fuzzy_matching
-    }
-
     pub fn show_all_outputs(&self) -> bool {
         self.display.show_all_outputs
     }

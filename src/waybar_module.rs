@@ -1,31 +1,104 @@
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
+    ptr,
     sync::{Arc, Mutex},
 };
 
 use futures::StreamExt;
 use waybar_cffi::gtk::{
     self, gio, glib,
+    glib::MainContext,
     traits::{BoxExt, ContainerExt, WidgetExt},
+    Orientation,
 };
+use waybar_cffi::sys::{wbcffi_init_info, wbcffi_module};
 
 use crate::{
+    app_icon::image_resolve::IconResolver,
     mpris_indicator::{self, AudioState},
     niri::{
-        border_colors::load_border_colors,
+        border_colors::{load_border_colors, BorderColors},
         event_stream,
         output_matching::{DisplayFilter, OutputMatcher},
-        CompositorClient, WindowInfo, WindowSnapshot,
+        CompositorClient, WindowSnapshot,
     },
-    notification_bubble::{self, style::NotificationUrgency, NotificationData},
+    notification_bubble::{self, NotificationData},
+    settings::Settings,
     window_button::WindowButton,
     window_list::{
         clear_selection, create_focused_window, create_selection_state, FocusedWindow,
         SelectionState,
     },
-    window_title::guess_term_proc_info::{self as proc_info, ProcessInfo},
-    SharedState, WaybarUpdater,
+    window_title::guess_term_proc_info::{self as proc_info},
 };
+
+pub(crate) type SharedState = Arc<SharedStateInner>;
+
+#[derive(Debug)]
+pub(crate) struct SharedStateInner {
+    pub settings: Settings,
+    pub icon_resolver: IconResolver,
+    pub compositor: CompositorClient,
+    pub border_colors: Mutex<BorderColors>,
+}
+
+fn create_shared_state(settings: Settings) -> SharedState {
+    let colors = load_border_colors();
+    Arc::new(SharedStateInner {
+        compositor: CompositorClient::create(settings.clone()),
+        icon_resolver: IconResolver::new(),
+        settings,
+        border_colors: Mutex::new(colors),
+    })
+}
+
+#[derive(Clone)]
+pub(crate) struct WaybarUpdater {
+    obj: *mut wbcffi_module,
+    queue_update: unsafe extern "C" fn(*mut wbcffi_module),
+}
+
+unsafe impl Send for WaybarUpdater {}
+unsafe impl Sync for WaybarUpdater {}
+
+impl WaybarUpdater {
+    pub(crate) fn from_init_info(info: &waybar_cffi::InitInfo) -> Self {
+        let raw_info = unsafe {
+            let ptr: *const *const wbcffi_init_info = ptr::from_ref(info).cast();
+            &**ptr
+        };
+        Self {
+            obj: raw_info.obj,
+            queue_update: raw_info.queue_update.expect("queue_update is not null"),
+        }
+    }
+
+    fn queue_update(&self) {
+        unsafe { (self.queue_update)(self.obj) };
+    }
+}
+
+pub(crate) fn initialize_module(
+    info: &waybar_cffi::InitInfo,
+    settings: Settings,
+    updater: WaybarUpdater,
+) {
+    let state = create_shared_state(settings);
+    let root = info.get_root_widget();
+
+    let container = gtk::Box::new(Orientation::Horizontal, 0);
+    container.set_vexpand(true);
+    container.set_hexpand(true);
+
+    root.add(&container);
+
+    let context = MainContext::default();
+    context.spawn_local(async move {
+        ModuleInstance::create(state, container, updater)
+            .run_event_loop()
+            .await;
+    });
+}
 
 // ── Event message ──
 
@@ -79,23 +152,6 @@ fn create_event_stream(
     (stream, audio_monitor)
 }
 
-// ── Process → window lookup (for notification matching) ──
-
-struct ProcessWindowMap<'a>(HashMap<i64, &'a WindowInfo>);
-
-impl<'a> ProcessWindowMap<'a> {
-    fn build(windows: impl Iterator<Item = &'a WindowInfo>) -> Self {
-        Self(
-            windows
-                .filter_map(|w| w.pid.map(|pid| (i64::from(pid), w)))
-                .collect(),
-        )
-    }
-
-    fn lookup(&self, pid: i64) -> Option<&'a WindowInfo> {
-        self.0.get(&pid).copied()
-    }
-}
 
 // ── Module instance ──
 
@@ -141,7 +197,7 @@ impl ModuleInstance {
 
         while let Some(event) = event_stream.next().await {
             match event {
-                EventMessage::Notification(notif) => self.handle_notification(notif).await,
+                EventMessage::Notification(notif) => self.handle_notification(notif),
                 EventMessage::AudioUpdate(state) => self.handle_audio_update(state),
                 EventMessage::ProcessInfoTick => self.handle_process_info_tick(),
                 EventMessage::FullSnapshot(snapshot) => {
@@ -250,127 +306,16 @@ impl ModuleInstance {
             })
     }
 
-    #[allow(clippy::too_many_lines)]
     #[tracing::instrument(level = "TRACE", skip(self))]
-    async fn handle_notification(&mut self, notification: Box<NotificationData>) {
+    fn handle_notification(&mut self, notification: Box<NotificationData>) {
         let Some(windows) = &self.previous_snapshot else {
             return;
         };
 
-        let urgency = NotificationUrgency::from_hint(notification.get_notification().hints.urgency);
-
-        if let Some(mut process_id) = notification.get_process_id() {
-            tracing::trace!(process_id, "attempting PID-based notification matching");
-
-            let process_map = ProcessWindowMap::build(windows.iter());
-            let mut matched = false;
-
-            loop {
-                if let Some(window) = process_map.lookup(process_id) {
-                    if !window.is_focused {
-                        if let Some(button) = self.buttons.get(&window.id) {
-                            tracing::trace!(
-                                window_id = window.id,
-                                process_id,
-                                "marking window as urgent via PID match"
-                            );
-                            button.mark_notification_urgent(urgency);
-                            matched = true;
-                        }
-                    }
-                }
-
-                match ProcessInfo::query(process_id).await {
-                    Ok(ProcessInfo { parent_id }) => {
-                        if let Some(parent) = parent_id {
-                            process_id = parent;
-                        } else {
-                            break;
-                        }
-                    }
-                    Err(e) => {
-                        tracing::trace!(process_id, %e, "process tree traversal ended");
-                        break;
-                    }
-                }
-            }
-
-            if matched {
-                return;
-            }
-        }
-
-        tracing::trace!("no PID match found for notification");
-
-        if !self.state.settings.notifications_use_desktop_entry() {
-            tracing::trace!("desktop entry matching disabled");
-            return;
-        }
-
-        let Some(desktop_entry) = &notification.get_notification().hints.desktop_entry else {
-            tracing::trace!("no desktop entry in notification");
-            return;
-        };
-
-        let fuzzy_enabled = self.state.settings.notifications_use_fuzzy_matching();
-        let mut fuzzy_matches = Vec::new();
-
-        let mapped_entry = self
-            .state
-            .settings
-            .notifications_app_map(desktop_entry)
-            .unwrap_or(desktop_entry);
-        let entry_lower = mapped_entry.to_lowercase();
-        let entry_suffix = mapped_entry
-            .split('.')
-            .next_back()
-            .unwrap_or_default()
-            .to_lowercase();
-
-        let mut exact_match = false;
-        for window in windows {
-            let Some(app_identifier) = window.app_id.as_deref() else {
-                continue;
-            };
-
-            if app_identifier == mapped_entry {
-                if let Some(button) = self.buttons.get(&window.id) {
-                    tracing::trace!(
-                        window_id = window.id,
-                        app_identifier,
-                        "exact app ID match for notification"
-                    );
-                    button.mark_notification_urgent(urgency);
-                    exact_match = true;
-                }
-            } else if fuzzy_enabled {
-                if app_identifier.to_lowercase() == entry_lower {
-                    tracing::trace!(
-                        app_identifier,
-                        window_id = window.id,
-                        "case-insensitive app ID match"
-                    );
-                    fuzzy_matches.push(window.id);
-                } else if app_identifier.contains('.') {
-                    if let Some(suffix) = app_identifier.split('.').next_back() {
-                        if suffix.to_lowercase() == entry_suffix {
-                            tracing::trace!(
-                                app_identifier,
-                                window_id = window.id,
-                                "suffix-based app ID match"
-                            );
-                            fuzzy_matches.push(window.id);
-                        }
-                    }
-                }
-            }
-        }
-
-        if !exact_match {
-            for window_id in fuzzy_matches {
-                if let Some(button) = self.buttons.get(&window_id) {
-                    button.mark_notification_urgent(urgency);
-                }
+        for (window_id, urgency) in notification_bubble::match_notification(&notification, windows)
+        {
+            if let Some(button) = self.buttons.get(&window_id) {
+                button.mark_notification_urgent(urgency);
             }
         }
     }

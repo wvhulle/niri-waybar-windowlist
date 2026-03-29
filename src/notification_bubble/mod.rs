@@ -13,6 +13,10 @@ use zbus::{
     Connection, MatchRule, Message, MessageStream,
 };
 
+use crate::niri::WindowInfo;
+
+pub(crate) use style::NotificationUrgency;
+
 #[derive(Error, Debug)]
 enum NotificationError {
     #[error(transparent)]
@@ -78,19 +82,13 @@ async fn run_monitor_with_reconnect(tx: Sender<NotificationData>) {
 #[derive(Debug, Clone)]
 pub struct NotificationData {
     notification: NotificationContent,
-    process_id: Option<u32>,
+    /// Full PID ancestor chain, resolved eagerly before the sender exits.
+    pid_chain: Vec<i64>,
 }
 
 impl NotificationData {
     pub fn get_notification(&self) -> &NotificationContent {
         &self.notification
-    }
-
-    pub fn get_process_id(&self) -> Option<i64> {
-        match self.process_id {
-            Some(pid) => Some(pid.into()),
-            None => self.notification.hints.sender_pid,
-        }
     }
 }
 
@@ -192,27 +190,59 @@ async fn handle_message(
     if msg.header().interface() == Some(&InterfaceName::from_static_str(NOTIFICATION_INTERFACE)?)
         && msg.header().member() == Some(&MemberName::from_static_str(NOTIFY_METHOD)?)
     {
-        let process_id = resolve_sender_pid(dbus_proxy, msg).await;
         let notification: NotificationContent = msg.body().deserialize()?;
+
+        // Use the sender-pid hint (available immediately from the message body)
+        // to walk the process tree synchronously before the sender exits.
+        // Fall back to a D-Bus PID lookup only if the hint is absent.
+        let hint_pid = notification.hints.sender_pid;
+        let pid_chain = if hint_pid.is_some() {
+            resolve_pid_chain(hint_pid)
+        } else {
+            let dbus_pid = resolve_sender_pid(dbus_proxy, msg).await.map(i64::from);
+            resolve_pid_chain(dbus_pid)
+        };
 
         tracing::debug!(
             app_name = ?notification.app_name,
             summary = %notification.summary,
-            desktop_entry = ?notification.hints.desktop_entry,
-            hint_pid = ?notification.hints.sender_pid,
-            ?process_id,
+            ?pid_chain,
             "received notification"
         );
 
         tx.send(NotificationData {
             notification,
-            process_id,
+            pid_chain,
         })
         .await
         .map_err(|_| NotificationError::ChannelClosed)?;
     }
 
     Ok(())
+}
+
+/// Walk the process tree from `start_pid` upward synchronously, collecting all
+/// ancestor PIDs. Uses synchronous `/proc` reads to avoid yielding while the
+/// short-lived sender process is still alive.
+fn resolve_pid_chain(start_pid: Option<i64>) -> Vec<i64> {
+    let mut chain = Vec::new();
+    let Some(mut pid) = start_pid else {
+        return chain;
+    };
+    chain.push(pid);
+    loop {
+        match procfs::process::Process::new(i32::try_from(pid).unwrap_or(0))
+            .and_then(|p| p.stat())
+        {
+            Ok(stat) if stat.ppid > 1 => {
+                let parent = i64::from(stat.ppid);
+                chain.push(parent);
+                pid = parent;
+            }
+            _ => break,
+        }
+    }
+    chain
 }
 
 /// Resolve the PID of the D-Bus sender immediately to minimise the race
@@ -230,4 +260,27 @@ async fn resolve_sender_pid(dbus_proxy: &DBusProxy<'_>, msg: &Message) -> Option
             None
         }
     }
+}
+
+// ── Notification → window matching ──
+
+/// Returns the IDs of unfocused windows that match the notification by PID,
+/// paired with the notification's urgency level.
+pub(crate) fn match_notification(
+    notification: &NotificationData,
+    windows: &[WindowInfo],
+) -> Vec<(u64, NotificationUrgency)> {
+    let urgency = NotificationUrgency::from_hint(notification.get_notification().hints.urgency);
+    let pid_set: std::collections::HashSet<i64> =
+        notification.pid_chain.iter().copied().collect();
+
+    windows
+        .iter()
+        .filter(|w| !w.is_focused)
+        .filter(|w| w.pid.is_some_and(|pid| pid_set.contains(&i64::from(pid))))
+        .map(|w| {
+            tracing::trace!(window_id = w.id, "notification matched window via PID chain");
+            (w.id, urgency)
+        })
+        .collect()
 }
