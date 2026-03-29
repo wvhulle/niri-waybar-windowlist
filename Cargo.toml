@@ -36,6 +36,7 @@ thiserror = "2.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 waybar-cffi = "0.1"
+pangocairo = "0.18"
 procfs = "0.17"
 zbus = "5.10"
 async-stream = "0.3"

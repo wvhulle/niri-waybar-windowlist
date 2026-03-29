@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt};
 
 use regex::Regex;
 use serde::{de, Deserialize, Deserializer};
@@ -25,6 +25,7 @@ pub struct Settings {
     notifications: NotificationConfig,
     icon_size: i32,
     icon_spacing: i32,
+    pub log_level: LogLevel,
     click_actions: ClickActions,
     ignore_rules: Vec<IgnoreRule>,
     context_menu: Vec<ContextMenuItem>,
@@ -42,6 +43,28 @@ pub struct Settings {
     drag: DragConfig,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LogLevel {
+    Trace,
+    Debug,
+    Info,
+    Warn,
+    Error,
+}
+
+impl fmt::Display for LogLevel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Trace => "trace",
+            Self::Debug => "debug",
+            Self::Info => "info",
+            Self::Warn => "warn",
+            Self::Error => "error",
+        })
+    }
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -49,6 +72,7 @@ impl Default for Settings {
             notifications: NotificationConfig::default(),
             icon_size: 24,
             icon_spacing: 6,
+            log_level: LogLevel::Info,
             click_actions: ClickActions::default(),
             ignore_rules: Vec::new(),
             context_menu: default_context_menu(),

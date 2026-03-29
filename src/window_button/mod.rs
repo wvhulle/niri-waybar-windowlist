@@ -107,7 +107,7 @@ impl WindowButton {
         event_box.add(&layout_box);
 
         setup_border_indicator(&indicator_color, &event_box);
-        setup_notification_bubble(&bubble_state, &event_box, Default::default());
+        setup_notification_bubble(&bubble_state, &event_box, Default::default(), None);
         event_box.add_events(
             gdk::EventMask::BUTTON_PRESS_MASK
                 | gdk::EventMask::BUTTON_RELEASE_MASK

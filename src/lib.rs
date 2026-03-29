@@ -1,4 +1,4 @@
-use std::sync::LazyLock;
+use std::sync::Once;
 
 use tracing_subscriber::{
     fmt::{format::FmtSpan, time::uptime},
@@ -20,20 +20,22 @@ mod window_title;
 
 pub(crate) use waybar_module::SharedState;
 
-static LOGGING: LazyLock<()> = LazyLock::new(|| {
-    if let Err(e) = tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("niri_waybar_windowlist=info")),
-        )
-        .with_span_events(FmtSpan::CLOSE)
-        .with_timer(uptime())
-        .with_writer(std::io::stderr)
-        .try_init()
-    {
-        eprintln!("tracing subscriber initialization failed: {e}");
-    }
-});
+static LOGGING_INIT: Once = Once::new();
+
+fn init_logging(level: &settings::LogLevel) {
+    LOGGING_INIT.call_once(|| {
+        let filter = format!("niri_waybar_windowlist={level}");
+        if let Err(e) = tracing_subscriber::fmt()
+            .with_env_filter(EnvFilter::new(&filter))
+            .with_span_events(FmtSpan::CLOSE)
+            .with_timer(uptime())
+            .with_writer(std::io::stderr)
+            .try_init()
+        {
+            eprintln!("tracing subscriber initialization failed: {e}");
+        }
+    });
+}
 
 struct WindowButtonsModule;
 
@@ -41,7 +43,7 @@ impl Module for WindowButtonsModule {
     type Config = settings::Settings;
 
     fn init(info: &waybar_cffi::InitInfo, settings: settings::Settings) -> Self {
-        *LOGGING;
+        init_logging(&settings.log_level);
 
         let updater = waybar_module::WaybarUpdater::from_init_info(info);
         waybar_module::initialize_module(info, settings, updater);

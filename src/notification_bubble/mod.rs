@@ -7,7 +7,7 @@ use serde::{Deserialize, Deserializer};
 use thiserror::Error;
 use waybar_cffi::gtk::glib;
 use zbus::{
-    fdo::{self, DBusProxy, MonitoringProxy},
+    fdo::{self, MonitoringProxy},
     names::{self as zbus_names, InterfaceName, MemberName},
     zvariant::{DeserializeDict, Optional, Type},
     Connection, MatchRule, Message, MessageStream,
@@ -154,13 +154,8 @@ static NOTIFY_METHOD: &str = "Notify";
 
 #[tracing::instrument(level = "TRACE", skip_all, err)]
 async fn run_monitor(tx: Sender<NotificationData>) -> Result<(), NotificationError> {
-    // Separate connection for PID lookups (the monitor connection cannot make
-    // method calls).
-    let lookup_connection = Connection::session().await?;
-    let dbus_proxy = DBusProxy::new(&lookup_connection).await?;
-
-    let monitor_connection = Connection::session().await?;
-    let monitor_proxy = MonitoringProxy::new(&monitor_connection).await?;
+    let connection = Connection::session().await?;
+    let monitor_proxy = MonitoringProxy::new(&connection).await?;
     monitor_proxy
         .become_monitor(
             &[MatchRule::builder()
@@ -172,9 +167,9 @@ async fn run_monitor(tx: Sender<NotificationData>) -> Result<(), NotificationErr
         .await?;
 
     tracing::info!("notification monitor connected");
-    let mut message_stream = MessageStream::from(monitor_connection);
+    let mut message_stream = MessageStream::from(connection);
     while let Some(msg) = message_stream.try_next().await? {
-        if let Err(e) = handle_message(&tx, &dbus_proxy, &msg).await {
+        if let Err(e) = handle_message(&tx, &msg).await {
             tracing::error!(%e, "notification processing failed");
         }
     }
@@ -184,7 +179,6 @@ async fn run_monitor(tx: Sender<NotificationData>) -> Result<(), NotificationErr
 
 async fn handle_message(
     tx: &Sender<NotificationData>,
-    dbus_proxy: &DBusProxy<'_>,
     msg: &Message,
 ) -> Result<(), NotificationError> {
     if msg.header().interface() == Some(&InterfaceName::from_static_str(NOTIFICATION_INTERFACE)?)
@@ -194,14 +188,7 @@ async fn handle_message(
 
         // Use the sender-pid hint (available immediately from the message body)
         // to walk the process tree synchronously before the sender exits.
-        // Fall back to a D-Bus PID lookup only if the hint is absent.
-        let hint_pid = notification.hints.sender_pid;
-        let pid_chain = if hint_pid.is_some() {
-            resolve_pid_chain(hint_pid)
-        } else {
-            let dbus_pid = resolve_sender_pid(dbus_proxy, msg).await.map(i64::from);
-            resolve_pid_chain(dbus_pid)
-        };
+        let pid_chain = resolve_pid_chain(notification.hints.sender_pid);
 
         tracing::debug!(
             app_name = ?notification.app_name,
@@ -245,22 +232,6 @@ fn resolve_pid_chain(start_pid: Option<i64>) -> Vec<i64> {
     chain
 }
 
-/// Resolve the PID of the D-Bus sender immediately to minimise the race
-/// window between receiving the monitored message and the sender disconnecting.
-async fn resolve_sender_pid(dbus_proxy: &DBusProxy<'_>, msg: &Message) -> Option<u32> {
-    let header = msg.header();
-    let sender = header.sender()?;
-    match dbus_proxy
-        .get_connection_unix_process_id(sender.clone().into())
-        .await
-    {
-        Ok(pid) => Some(pid),
-        Err(e) => {
-            tracing::trace!(%e, %sender, "sender PID lookup failed (sender may have disconnected)");
-            None
-        }
-    }
-}
 
 // ── Notification → window matching ──
 
@@ -279,7 +250,7 @@ pub(crate) fn match_notification(
         .filter(|w| !w.is_focused)
         .filter(|w| w.pid.is_some_and(|pid| pid_set.contains(&i64::from(pid))))
         .map(|w| {
-            tracing::trace!(window_id = w.id, "notification matched window via PID chain");
+            tracing::debug!(window_id = w.id, "notification matched window via PID chain");
             (w.id, urgency)
         })
         .collect()
