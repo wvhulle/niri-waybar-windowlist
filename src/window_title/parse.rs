@@ -1,7 +1,11 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
+use std::path::Path;
 
+use minijinja::{AutoEscape, Environment};
 use regex::Regex;
-use serde::{Deserialize, Deserializer};
+use serde::{de, Deserialize, Deserializer};
+
+// ── Title format rule ──
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct TitleFormatRule {
@@ -19,7 +23,7 @@ where
     D: Deserializer<'de>,
 {
     let pattern = String::deserialize(deserializer)?;
-    Regex::new(&pattern).map_err(serde::de::Error::custom)
+    Regex::new(&pattern).map_err(de::Error::custom)
 }
 
 fn rule(pattern: &str, format: &str) -> TitleFormatRule {
@@ -43,8 +47,6 @@ pub fn default_rules() -> HashMap<String, TitleFormatRule> {
     let terminal_format = "<i>{{ cwd | shorten_home }}</i>{% if cmd %} · {{ cmd }}{% endif %}";
 
     // Firefox: "Page · Site — Mozilla Firefox" or "Page — Mozilla Firefox"
-    // Uses em-dash to split off the browser suffix; middle-dot separates page from
-    // site
     let firefox_pattern = r"^(?P<page>.+?)(?:\s·\s(?P<site>.+?))?\s—\s.+$";
     let firefox_format = "{% if site %}<i>{{ site }}</i> · {% endif %}{{ page }}";
 
@@ -86,4 +88,42 @@ pub fn default_rules() -> HashMap<String, TitleFormatRule> {
     .into_iter()
     .map(|(id, r)| (id.to_string(), r))
     .collect()
+}
+
+// ── Template rendering ──
+
+fn create_template_env() -> Environment<'static> {
+    let mut env = Environment::new();
+    env.set_auto_escape_callback(|_| AutoEscape::Html);
+    env.add_filter("basename", |path: String| -> String {
+        Path::new(&path)
+            .file_name()
+            .map_or(path.clone(), |n| n.to_string_lossy().into_owned())
+    });
+    env.add_filter("shorten_home", |path: String| -> String {
+        dirs::home_dir()
+            .filter(|home| path.starts_with(&*home.to_string_lossy()))
+            .map(|home| format!("~{}", &path[home.to_string_lossy().len()..]))
+            .unwrap_or(path)
+    });
+    env
+}
+
+thread_local! {
+    static TEMPLATE_ENV: Environment<'static> = create_template_env();
+}
+
+pub fn render_with_rule(rule: &TitleFormatRule, captures: &BTreeMap<&str, &str>) -> Option<String> {
+    TEMPLATE_ENV.with(|env| {
+        match env.render_str(
+            &rule.format,
+            minijinja::context! { ..minijinja::Value::from_serialize(captures) },
+        ) {
+            Ok(rendered) => Some(rendered),
+            Err(e) => {
+                tracing::warn!(%e, "template render failed");
+                None
+            }
+        }
+    })
 }

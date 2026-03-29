@@ -1,8 +1,12 @@
+use std::io::ErrorKind;
+use std::thread;
+use std::time::Duration;
+
 use async_channel::{Receiver, Sender};
 use niri_ipc::{Event, Request};
 
 use super::{connect_socket, tracker::WindowTracker, validate_handled, WindowSnapshot};
-use crate::CompositorIpcError;
+use crate::{CompositorIpcError, EventMessage};
 
 pub enum CompositorEvent {
     FullSnapshot(WindowSnapshot),
@@ -18,7 +22,7 @@ pub struct NiriEventStream {
 impl NiriEventStream {
     pub(super) fn start(filter_workspace: bool) -> Self {
         let (tx, rx) = async_channel::unbounded();
-        std::thread::spawn(move || {
+        thread::spawn(move || {
             if let Err(e) = run_event_stream(&tx, filter_workspace) {
                 tracing::error!(%e, "niri event stream terminated");
             }
@@ -29,6 +33,25 @@ impl NiriEventStream {
 
     pub async fn next(&self) -> Option<CompositorEvent> {
         self.receiver.recv().await.ok()
+    }
+}
+
+pub(crate) async fn forward_events(
+    tx: async_channel::Sender<EventMessage>,
+    stream: NiriEventStream,
+) {
+    while let Some(event) = stream.next().await {
+        let msg = match event {
+            CompositorEvent::FullSnapshot(snapshot) => EventMessage::FullSnapshot(snapshot),
+            CompositorEvent::FocusChanged { old, new } => {
+                EventMessage::FocusChanged { old, new }
+            }
+            CompositorEvent::Workspaces => EventMessage::Workspaces(()),
+            CompositorEvent::ConfigReloaded => EventMessage::ConfigReloaded,
+        };
+        if let Err(e) = tx.send(msg).await {
+            tracing::error!(%e, "failed to forward compositor event");
+        }
     }
 }
 
@@ -48,7 +71,7 @@ fn run_event_stream(
             }
             Err(e) => {
                 tracing::warn!(%e, backoff_secs, "niri event stream error, reconnecting");
-                std::thread::sleep(std::time::Duration::from_secs(backoff_secs));
+                thread::sleep(Duration::from_secs(backoff_secs));
                 backoff_secs = (backoff_secs * 2).min(MAX_BACKOFF_SECS);
             }
         }
@@ -91,7 +114,7 @@ fn try_run_event_stream(
                         .map_err(|_| CompositorIpcError::EventChannelClosed)?;
                 }
             }
-            Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
+            Err(e) if e.kind() == ErrorKind::InvalidData => {
                 tracing::debug!("skipping unknown niri event: {e}");
             }
             Err(e) => {

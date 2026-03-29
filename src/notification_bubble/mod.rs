@@ -1,14 +1,14 @@
 use std::{ops::Deref, time::Duration};
 
 use async_channel::Sender;
-use futures::{Stream, TryStreamExt};
+use futures::{Stream, StreamExt, TryStreamExt};
 use itertools::Itertools;
 use serde::{Deserialize, Deserializer};
 use thiserror::Error;
 use waybar_cffi::gtk::glib;
 use zbus::{
-    fdo::MonitoringProxy,
-    names::{InterfaceName, MemberName},
+    fdo::{self, MonitoringProxy},
+    names::{self as zbus_names, InterfaceName, MemberName},
     zvariant::{DeserializeDict, Optional, Type},
     Connection, MatchRule, Message, MessageStream,
 };
@@ -19,16 +19,29 @@ enum NotificationError {
     Zbus(#[from] zbus::Error),
 
     #[error(transparent)]
-    ZbusFdo(#[from] zbus::fdo::Error),
+    ZbusFdo(#[from] fdo::Error),
 
     #[error(transparent)]
-    ZbusNames(#[from] zbus::names::Error),
+    ZbusNames(#[from] zbus_names::Error),
 
     #[error("notification channel closed")]
     ChannelClosed,
 }
 
 mod pid_cache;
+pub(crate) mod settings;
+
+pub(crate) async fn forward_events(tx: Sender<crate::EventMessage>) {
+    let mut stream = Box::pin(create_stream());
+    while let Some(notification) = StreamExt::next(&mut stream).await {
+        if let Err(e) = tx
+            .send(crate::EventMessage::Notification(Box::new(notification)))
+            .await
+        {
+            tracing::error!(%e, "failed to forward notification");
+        }
+    }
+}
 
 pub fn create_stream() -> impl Stream<Item = NotificationData> {
     let (tx, rx) = async_channel::unbounded();

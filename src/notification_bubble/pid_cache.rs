@@ -9,7 +9,7 @@ use futures::{channel::oneshot, FutureExt, StreamExt, TryStreamExt};
 use thiserror::Error;
 use waybar_cffi::gtk::glib;
 use zbus::{
-    fdo::{DBusProxy, MonitoringProxy, NameOwnerChanged},
+    fdo::{self, DBusProxy, MonitoringProxy, NameOwnerChanged},
     message::Type,
     names::UniqueName,
     Connection, MatchRule, MessageStream,
@@ -21,7 +21,7 @@ enum PidCacheError {
     Zbus(#[from] zbus::Error),
 
     #[error(transparent)]
-    ZbusFdo(#[from] zbus::fdo::Error),
+    ZbusFdo(#[from] fdo::Error),
 }
 
 #[derive(Debug, Clone)]

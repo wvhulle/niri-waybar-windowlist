@@ -9,11 +9,16 @@ license = "GPL-3.0-or-later"
 crate-type = ["cdylib", "rlib"]
 
 [[bin]]
-name = "audio-test"
-path = "src/main.rs"
+name = "print-mpris-state"
+path = "src/bin/print_mpris_state.rs"
+
+[[bin]]
+name = "test-waybar"
+path = "src/bin/test.rs"
 
 [lints.clippy]
 pedantic = "warn"
+absolute_paths = "warn"
 
 [dependencies]
 async-channel = "2.5"

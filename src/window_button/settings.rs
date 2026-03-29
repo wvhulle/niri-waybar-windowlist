@@ -2,6 +2,32 @@ use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
+pub struct TooltipConfig {
+    pub(crate) show_tooltip: bool,
+    pub(crate) tooltip_delay: u32,
+}
+
+impl Default for TooltipConfig {
+    fn default() -> Self {
+        Self {
+            show_tooltip: true,
+            tooltip_delay: 300,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ModifierKey {
+    #[default]
+    Ctrl,
+    Shift,
+    Alt,
+    Super,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
 pub struct ClickActions {
     pub left_click_unfocused: ClickAction,
     pub left_click_focused: ClickAction,
@@ -78,30 +104,12 @@ pub enum ClickAction {
 
 impl ClickAction {
     pub fn is_menu(&self) -> bool {
-        matches!(self, ClickAction::Action(WindowAction::Menu))
+        matches!(self, Self::Action(WindowAction::Menu))
     }
 
     pub fn is_none(&self) -> bool {
-        matches!(self, ClickAction::Action(WindowAction::None))
+        matches!(self, Self::Action(WindowAction::None))
     }
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct ContextMenuItem {
-    pub label: String,
-    #[serde(default)]
-    pub action: Option<WindowAction>,
-    #[serde(default)]
-    pub command: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct MultiSelectMenuItem {
-    pub label: String,
-    #[serde(default)]
-    pub action: Option<MultiSelectAction>,
-    #[serde(default)]
-    pub command: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
@@ -122,49 +130,4 @@ pub enum MultiSelectAction {
     CenterColumns,
     ConsumeIntoColumn,
     ToggleTabbedDisplay,
-}
-
-pub fn default_context_menu() -> Vec<ContextMenuItem> {
-    vec![
-        ContextMenuItem {
-            label: "  Maximize Column".to_string(),
-            action: Some(WindowAction::MaximizeColumn),
-            command: None,
-        },
-        ContextMenuItem {
-            label: "  Maximize to Edges".to_string(),
-            action: Some(WindowAction::MaximizeWindowToEdges),
-            command: None,
-        },
-        ContextMenuItem {
-            label: "󰉩  Toggle Floating".to_string(),
-            action: Some(WindowAction::ToggleWindowFloating),
-            command: None,
-        },
-        ContextMenuItem {
-            label: "  Close Window".to_string(),
-            action: Some(WindowAction::CloseWindow),
-            command: None,
-        },
-    ]
-}
-
-pub fn default_multi_select_menu() -> Vec<MultiSelectMenuItem> {
-    vec![
-        MultiSelectMenuItem {
-            label: "  Close All".to_string(),
-            action: Some(MultiSelectAction::CloseWindows),
-            command: None,
-        },
-        MultiSelectMenuItem {
-            label: "  Move All to Workspace Up".to_string(),
-            action: Some(MultiSelectAction::MoveToWorkspaceUp),
-            command: None,
-        },
-        MultiSelectMenuItem {
-            label: "  Move All to Workspace Down".to_string(),
-            action: Some(MultiSelectAction::MoveToWorkspaceDown),
-            command: None,
-        },
-    ]
 }

@@ -1,12 +1,14 @@
 mod tracker;
+pub(crate) mod settings;
 
+pub mod border_colors;
 pub mod client;
 pub mod event_stream;
+pub mod output_matching;
 
 use std::ops::Deref;
 
 pub use client::CompositorClient;
-pub use event_stream::{CompositorEvent, NiriEventStream};
 use niri_ipc::{socket::Socket, Reply, Request};
 
 use crate::CompositorIpcError;

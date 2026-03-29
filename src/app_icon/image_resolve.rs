@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    env,
     path::PathBuf,
     sync::{Arc, LazyLock, Mutex},
 };
@@ -90,7 +91,7 @@ fn extract_icon_path(info: &DesktopAppInfo) -> Option<PathBuf> {
 }
 
 static DATA_DIRECTORIES: LazyLock<Vec<PathBuf>> = LazyLock::new(|| {
-    let home_dirs = std::env::var("HOME").into_iter().flat_map(|home| {
+    let home_dirs = env::var("HOME").into_iter().flat_map(|home| {
         let home_path = PathBuf::from(home);
         [
             home_path.join(".local/share"),
@@ -99,7 +100,7 @@ static DATA_DIRECTORIES: LazyLock<Vec<PathBuf>> = LazyLock::new(|| {
     });
 
     let xdg_dirs: Box<dyn Iterator<Item = PathBuf>> =
-        if let Ok(xdg_data) = std::env::var("XDG_DATA_DIRS") {
+        if let Ok(xdg_data) = env::var("XDG_DATA_DIRS") {
             Box::new(
                 xdg_data
                     .split(':')
@@ -119,8 +120,6 @@ static DATA_DIRECTORIES: LazyLock<Vec<PathBuf>> = LazyLock::new(|| {
 
     home_dirs
         .chain(xdg_dirs)
-        .chain(std::iter::once(PathBuf::from(
-            "/var/lib/flatpak/exports/share",
-        )))
+        .chain([PathBuf::from("/var/lib/flatpak/exports/share")])
         .collect()
 });

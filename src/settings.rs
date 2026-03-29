@@ -1,12 +1,22 @@
-mod click_actions;
-mod title_format;
-
 use std::collections::HashMap;
 
-pub use click_actions::*;
 use regex::Regex;
-use serde::{Deserialize, Deserializer};
-pub use title_format::*;
+use serde::{de, Deserialize, Deserializer};
+
+use crate::{
+    mpris_indicator::settings::AudioIndicatorConfig,
+    niri::settings::DisplayConfig,
+    notification_bubble::settings::NotificationConfig,
+    right_click_menu::settings::{
+        default_context_menu, default_multi_select_menu, ContextMenuItem, MultiSelectMenuItem,
+    },
+    window_button::settings::{ClickActions, ModifierKey, TooltipConfig},
+    window_list::settings::DragConfig,
+    window_title::{
+        parse::TitleFormatRule,
+        settings::{TitleDisplayConfig, TitleFormatConfig},
+    },
+};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
@@ -25,63 +35,11 @@ pub struct Settings {
     #[serde(flatten)]
     display: DisplayConfig,
     #[serde(flatten)]
+    title_display: TitleDisplayConfig,
+    #[serde(flatten)]
     tooltip: TooltipConfig,
     #[serde(flatten)]
     drag: DragConfig,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(default)]
-pub struct DisplayConfig {
-    show_all_outputs: bool,
-    only_current_workspace: bool,
-    show_window_titles: bool,
-    truncate_titles: bool,
-    allow_title_linebreaks: bool,
-}
-
-impl Default for DisplayConfig {
-    fn default() -> Self {
-        Self {
-            show_all_outputs: false,
-            only_current_workspace: true,
-            show_window_titles: true,
-            truncate_titles: true,
-            allow_title_linebreaks: false,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(default)]
-pub struct TooltipConfig {
-    show_tooltip: bool,
-    tooltip_delay: u32,
-}
-
-impl Default for TooltipConfig {
-    fn default() -> Self {
-        Self {
-            show_tooltip: true,
-            tooltip_delay: 300,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(default)]
-pub struct DragConfig {
-    drag_hover_focus: bool,
-    drag_hover_focus_delay: u32,
-}
-
-impl Default for DragConfig {
-    fn default() -> Self {
-        Self {
-            drag_hover_focus: true,
-            drag_hover_focus_delay: 500,
-        }
-    }
 }
 
 impl Default for Settings {
@@ -99,58 +57,9 @@ impl Default for Settings {
             audio_indicator: AudioIndicatorConfig::default(),
             title_format: TitleFormatConfig::default(),
             display: DisplayConfig::default(),
+            title_display: TitleDisplayConfig::default(),
             tooltip: TooltipConfig::default(),
             drag: DragConfig::default(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum ModifierKey {
-    #[default]
-    Ctrl,
-    Shift,
-    Alt,
-    Super,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(default)]
-pub struct AudioIndicatorConfig {
-    pub enabled: bool,
-    pub playing_icon: String,
-    pub muted_icon: String,
-    pub clickable: bool,
-}
-
-impl Default for AudioIndicatorConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            playing_icon: "󰕾".to_string(),
-            muted_icon: "󰖁".to_string(),
-            clickable: true,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(default)]
-pub struct NotificationConfig {
-    enabled: bool,
-    map_app_ids: HashMap<String, String>,
-    use_desktop_entry: bool,
-    use_fuzzy_matching: bool,
-}
-
-impl Default for NotificationConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            map_app_ids: HashMap::new(),
-            use_desktop_entry: true,
-            use_fuzzy_matching: false,
         }
     }
 }
@@ -180,7 +89,7 @@ where
     D: Deserializer<'de>,
 {
     let pattern = String::deserialize(deserializer)?;
-    Regex::new(&pattern).map_err(serde::de::Error::custom)
+    Regex::new(&pattern).map_err(de::Error::custom)
 }
 
 fn parse_optional_regex<'de, D>(deserializer: D) -> Result<Option<Regex>, D::Error>
@@ -189,7 +98,7 @@ where
 {
     let pattern: Option<String> = Option::deserialize(deserializer)?;
     pattern
-        .map(|p| Regex::new(&p).map_err(serde::de::Error::custom))
+        .map(|p| Regex::new(&p).map_err(de::Error::custom))
         .transpose()
 }
 
@@ -263,7 +172,7 @@ impl Settings {
     }
 
     pub fn show_window_titles(&self) -> bool {
-        self.display.show_window_titles
+        self.title_display.show_window_titles
     }
 
     pub fn icon_size(&self) -> i32 {
@@ -295,11 +204,11 @@ impl Settings {
     }
 
     pub fn truncate_titles(&self) -> bool {
-        self.display.truncate_titles
+        self.title_display.truncate_titles
     }
 
     pub fn allow_title_linebreaks(&self) -> bool {
-        self.display.allow_title_linebreaks
+        self.title_display.allow_title_linebreaks
     }
 
     pub fn show_tooltip(&self) -> bool {
@@ -322,7 +231,6 @@ impl Settings {
         }
     }
 
-    /// Returns `true` if this `app_id` has a title format rule with `poll_proc` enabled.
     pub fn should_poll_proc(&self, app_id: Option<&str>) -> bool {
         self.title_format.enabled
             && app_id.is_some_and(|id| {
@@ -333,7 +241,6 @@ impl Settings {
             })
     }
 
-    /// Returns the proc poll interval if any rule has `poll_proc` enabled.
     pub fn proc_poll_interval(&self) -> Option<u64> {
         if self.title_format.enabled
             && self.title_format.rules.values().any(|rule| rule.poll_proc)

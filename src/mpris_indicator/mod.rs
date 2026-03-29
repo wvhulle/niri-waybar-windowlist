@@ -1,12 +1,17 @@
+pub mod settings;
+pub mod style;
+
 use std::collections::HashMap;
 
 use async_channel::Sender;
-use futures::{Stream, TryStreamExt};
+use futures::{Stream, StreamExt, TryStreamExt};
 use waybar_cffi::gtk::glib;
 use zbus::{
+    fdo::DBusProxy,
+    message::Type as MessageType,
     names::{BusName, InterfaceName, OwnedBusName},
     zvariant::{OwnedValue, Value},
-    Connection, MatchRule, MessageStream,
+    Connection, MatchRule, Message, MessageStream,
 };
 
 const MPRIS_PREFIX: &str = "org.mpris.MediaPlayer2.";
@@ -75,6 +80,18 @@ pub fn start() -> (AudioMonitor, impl Stream<Item = AudioState>) {
     };
 
     (monitor, stream)
+}
+
+pub(crate) async fn forward_events(
+    tx: async_channel::Sender<crate::EventMessage>,
+    stream: impl Stream<Item = AudioState>,
+) {
+    let mut stream = Box::pin(stream);
+    while let Some(state) = stream.next().await {
+        if let Err(e) = tx.send(crate::EventMessage::AudioUpdate(state)).await {
+            tracing::error!(%e, "failed to forward audio update");
+        }
+    }
 }
 
 async fn run_monitor_with_reconnect(tx: Sender<AudioState>) {
@@ -219,7 +236,7 @@ async fn run_monitor(tx: Sender<AudioState>) -> Result<(), zbus::Error> {
 
     // Subscribe to NameOwnerChanged for MPRIS player appear/disappear
     let name_rule = MatchRule::builder()
-        .msg_type(zbus::message::Type::Signal)
+        .msg_type(MessageType::Signal)
         .interface("org.freedesktop.DBus")?
         .member("NameOwnerChanged")?
         .build();
@@ -227,7 +244,7 @@ async fn run_monitor(tx: Sender<AudioState>) -> Result<(), zbus::Error> {
 
     // Subscribe to PropertiesChanged on MPRIS Player interface
     let props_rule = MatchRule::builder()
-        .msg_type(zbus::message::Type::Signal)
+        .msg_type(MessageType::Signal)
         .interface(PROPERTIES_INTERFACE)?
         .member("PropertiesChanged")?
         .build();
@@ -259,7 +276,7 @@ async fn run_monitor(tx: Sender<AudioState>) -> Result<(), zbus::Error> {
 }
 
 async fn handle_name_changed(
-    msg: &zbus::Message,
+    msg: &Message,
     connection: &Connection,
     players: &mut HashMap<OwnedBusName, TrackedPlayer>,
     tx: &Sender<AudioState>,
@@ -313,8 +330,8 @@ async fn handle_name_changed(
 }
 
 async fn handle_properties_changed(
-    msg: &zbus::Message,
-    dbus_proxy: &zbus::fdo::DBusProxy<'_>,
+    msg: &Message,
+    dbus_proxy: &DBusProxy<'_>,
     players: &mut HashMap<OwnedBusName, TrackedPlayer>,
     tx: &Sender<AudioState>,
 ) {

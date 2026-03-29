@@ -1,10 +1,10 @@
-use std::path::PathBuf;
+use std::{env, fs, path::PathBuf};
 
 use waybar_cffi::gtk::gdk;
 
 fn niri_config_path() -> PathBuf {
-    let config_home = std::env::var_os("XDG_CONFIG_HOME").map_or_else(
-        || PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config"),
+    let config_home = env::var_os("XDG_CONFIG_HOME").map_or_else(
+        || PathBuf::from(env::var_os("HOME").unwrap_or_default()).join(".config"),
         PathBuf::from,
     );
     config_home.join("niri/config.kdl")
@@ -70,7 +70,7 @@ fn parse_indicator_color(
 
 pub fn load_border_colors() -> BorderColors {
     let path = niri_config_path();
-    let content = match std::fs::read_to_string(&path) {
+    let content = match fs::read_to_string(&path) {
         Ok(c) => c,
         Err(e) => {
             panic!("failed to read niri config at {}: {e}", path.display());

@@ -1,12 +1,15 @@
 use std::path::Path;
+use std::time::Duration;
 
-use futures::AsyncReadExt;
+use futures::{io, AsyncReadExt};
 use procfs::process::Process;
 use thiserror::Error;
 use waybar_cffi::gtk::{
     gio::{prelude::InputStreamExtManual, traits::FileExt, File},
     glib::{self, Priority},
 };
+
+use crate::EventMessage;
 
 pub struct ProcessInfo {
     pub parent_id: Option<i64>,
@@ -153,9 +156,22 @@ pub enum ProcessError {
     #[error("cannot read /proc/{pid}/stat: {e}")]
     FileRead {
         #[source]
-        e: futures::io::Error,
+        e: io::Error,
         pid: i64,
     },
+}
+
+pub(crate) async fn forward_poll_ticks(
+    tx: async_channel::Sender<EventMessage>,
+    interval_ms: u64,
+) {
+    loop {
+        glib::timeout_future(Duration::from_millis(interval_ms)).await;
+        if let Err(e) = tx.send(EventMessage::ProcessInfoTick).await {
+            tracing::error!(%e, "failed to forward process info tick");
+            break;
+        }
+    }
 }
 
 #[derive(Error, Debug)]

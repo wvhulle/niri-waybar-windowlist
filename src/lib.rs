@@ -1,45 +1,51 @@
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
-    sync::{Arc, LazyLock, Mutex},
+    fs::OpenOptions,
+    io,
+    path::PathBuf,
+    ptr,
+    sync::{Arc, LazyLock, Mutex, PoisonError},
 };
 
 use futures::StreamExt;
 use settings::Settings;
 use thiserror::Error;
-use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
+use tracing_subscriber::{fmt::format::FmtSpan, fmt::time::uptime, EnvFilter};
 use waybar_cffi::{
     gtk::{
         self, gio,
-        glib::MainContext,
+        glib::{self, MainContext},
         traits::{BoxExt, ContainerExt, WidgetExt},
         Orientation,
     },
-    sys::wbcffi_module,
+    sys::{wbcffi_init_info, wbcffi_module},
     waybar_module, Module,
 };
 
-pub mod audio;
-mod compositor;
-mod event_stream;
-mod icon_resolver;
-mod niri_border_colors;
-mod notifications;
-mod output_matching;
-mod process_info;
+pub mod mpris_indicator;
+mod focus_urgent_indicator;
+mod app_icon;
+mod niri;
+mod notification_bubble;
+mod right_click_menu;
 mod settings;
-mod title_format;
 mod window_button;
+mod window_list;
+mod window_title;
 
-use audio::AudioState;
-use compositor::{CompositorClient, WindowInfo, WindowSnapshot};
-use event_stream::EventMessage;
-use icon_resolver::IconResolver;
-use niri_border_colors::BorderColors;
-use notifications::NotificationData;
-use process_info::ProcessInfo;
-use window_button::{
+use mpris_indicator::AudioState;
+use app_icon::image_resolve::IconResolver;
+use niri::{
+    border_colors::{load_border_colors, BorderColors},
+    event_stream,
+    output_matching::{DisplayFilter, OutputMatcher},
+    CompositorClient, WindowInfo, WindowSnapshot,
+};
+use notification_bubble::NotificationData;
+use window_title::guess_term_proc_info::{self as proc_info, ProcessInfo};
+use window_button::WindowButton;
+use window_list::{
     clear_selection, create_focused_window, create_selection_state, FocusedWindow, SelectionState,
-    WindowButton,
 };
 
 // ── Errors (inlined from errors.rs) ──
@@ -47,7 +53,7 @@ use window_button::{
 #[derive(Error, Debug)]
 pub enum CompositorIpcError {
     #[error("IPC error: {0}")]
-    Io(#[source] std::io::Error),
+    Io(#[source] io::Error),
 
     #[error("compositor returned error: {0}")]
     Reply(String),
@@ -72,6 +78,60 @@ impl CompositorIpcError {
     }
 }
 
+// ── Event stream ──
+
+pub(crate) enum EventMessage {
+    Notification(Box<NotificationData>),
+    FullSnapshot(niri::WindowSnapshot),
+    FocusChanged { old: Option<u64>, new: Option<u64> },
+    Workspaces(()),
+    AudioUpdate(AudioState),
+    ProcessInfoTick,
+    ConfigReloaded,
+}
+
+fn create_event_stream(
+    state: &SharedState,
+) -> (
+    impl futures::Stream<Item = EventMessage>,
+    Option<mpris_indicator::AudioMonitor>,
+) {
+    let (tx, rx) = async_channel::unbounded();
+    let mut audio_monitor = None;
+
+    if state.settings().notifications_enabled() {
+        glib::spawn_future_local(notification_bubble::forward_events(tx.clone()));
+    }
+
+    if state.settings().audio_indicator().enabled {
+        let (monitor, stream) = mpris_indicator::start();
+        glib::spawn_future_local(mpris_indicator::forward_events(tx.clone(), stream));
+        audio_monitor = Some(monitor);
+    }
+
+    if let Some(interval_ms) = state.settings().proc_poll_interval() {
+        tracing::info!(interval_ms, "starting proc poll timer");
+        glib::spawn_future_local(
+            proc_info::forward_poll_ticks(tx.clone(), interval_ms),
+        );
+    } else {
+        tracing::info!("proc polling disabled (no poll_proc rules)");
+    }
+
+    glib::spawn_future_local(event_stream::forward_events(
+        tx,
+        state.compositor().create_event_stream(),
+    ));
+
+    let stream = async_stream::stream! {
+        while let Ok(event) = rx.recv().await {
+            yield event;
+        }
+    };
+
+    (stream, audio_monitor)
+}
+
 // ── SharedState (moved from global.rs) ──
 
 #[derive(Debug, Clone)]
@@ -87,7 +147,7 @@ struct StateInner {
 
 impl SharedState {
     fn create(settings: Settings) -> Self {
-        let colors = crate::niri_border_colors::load_border_colors();
+        let colors = load_border_colors();
         Self(Arc::new(StateInner {
             compositor: CompositorClient::create(settings.clone()),
             icon_resolver: IconResolver::new(),
@@ -113,16 +173,16 @@ impl SharedState {
             .0
             .border_colors
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(PoisonError::into_inner)
     }
 
     pub fn reload_border_colors(&self) {
-        let colors = crate::niri_border_colors::load_border_colors();
+        let colors = load_border_colors();
         *self
             .0
             .border_colors
             .lock()
-            .unwrap_or_else(|e| e.into_inner()) = colors;
+            .unwrap_or_else(PoisonError::into_inner) = colors;
         tracing::info!("border colors reloaded");
     }
 }
@@ -131,10 +191,10 @@ impl SharedState {
 
 static LOGGING: LazyLock<()> = LazyLock::new(|| {
     let log_path = dirs::cache_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
         .join("window-list.log");
 
-    let log_file = match std::fs::OpenOptions::new()
+    let log_file = match OpenOptions::new()
         .create(true)
         .append(true)
         .open(&log_path)
@@ -152,7 +212,7 @@ static LOGGING: LazyLock<()> = LazyLock::new(|| {
                 .unwrap_or_else(|_| EnvFilter::new("niri_waybar_windowlist=info")),
         )
         .with_span_events(FmtSpan::CLOSE)
-        .with_timer(tracing_subscriber::fmt::time::uptime())
+        .with_timer(uptime())
         .with_writer(log_file)
         .with_ansi(false)
         .try_init()
@@ -187,8 +247,8 @@ impl Module for WindowButtonsModule {
         *LOGGING;
 
         let raw_info = unsafe {
-            let ptr: *const *const waybar_cffi::sys::wbcffi_init_info =
-                std::ptr::from_ref(info).cast();
+            let ptr: *const *const wbcffi_init_info =
+                ptr::from_ref(info).cast();
             &**ptr
         };
         let updater = WaybarUpdater {
@@ -198,9 +258,7 @@ impl Module for WindowButtonsModule {
 
         let shared_state = SharedState::create(settings);
 
-        if let Err(e) = initialize_module(info, shared_state, updater) {
-            tracing::error!(%e, "module initialization failed");
-        }
+        initialize_module(info, shared_state, updater);
 
         Self
     }
@@ -212,7 +270,7 @@ fn initialize_module(
     info: &waybar_cffi::InitInfo,
     state: SharedState,
     updater: WaybarUpdater,
-) -> Result<(), CompositorIpcError> {
+) {
     let root = info.get_root_widget();
 
     let container = gtk::Box::new(Orientation::Horizontal, 0);
@@ -227,8 +285,6 @@ fn initialize_module(
             .run_event_loop()
             .await;
     });
-
-    Ok(())
 }
 
 // ── Module instance ──
@@ -243,7 +299,7 @@ struct ModuleInstance {
     selection: SelectionState,
     focused_window: FocusedWindow,
     audio_state: AudioState,
-    audio_monitor_handle: Option<audio::AudioMonitor>,
+    audio_monitor_handle: Option<mpris_indicator::AudioMonitor>,
     window_pids: HashMap<u64, u32>,
     updater: WaybarUpdater,
 }
@@ -269,7 +325,7 @@ impl ModuleInstance {
     async fn run_event_loop(&mut self) {
         let display_filter = Arc::new(Mutex::new(self.determine_display_filter().await));
 
-        let (stream, audio_monitor) = event_stream::create_event_stream(&self.state);
+        let (stream, audio_monitor) = create_event_stream(&self.state);
         self.audio_monitor_handle = audio_monitor;
         let mut event_stream = Box::pin(stream);
 
@@ -307,7 +363,7 @@ impl ModuleInstance {
                     if filter_changed && self.update_output_and_resize() {
                         if let Some(snapshot) = self.previous_snapshot.clone() {
                             let filter =
-                                Arc::new(Mutex::new(output_matching::DisplayFilter::ShowAll));
+                                Arc::new(Mutex::new(DisplayFilter::ShowAll));
                             self.handle_window_update(snapshot, filter).await;
                         }
                     }
@@ -335,56 +391,56 @@ impl ModuleInstance {
         let outputs = CompositorClient::query_outputs().ok()?;
 
         outputs.into_iter().find_map(|(output_name, output_info)| {
-            (output_matching::OutputMatcher::compare(&monitor, &output_info)
-                == output_matching::OutputMatcher::all())
+            (OutputMatcher::compare(&monitor, &output_info)
+                == OutputMatcher::all())
             .then_some(output_name)
         })
     }
 
     #[tracing::instrument(level = "DEBUG", skip(self))]
-    async fn determine_display_filter(&self) -> output_matching::DisplayFilter {
+    async fn determine_display_filter(&self) -> DisplayFilter {
         if self.state.settings().show_all_outputs() {
-            return output_matching::DisplayFilter::ShowAll;
+            return DisplayFilter::ShowAll;
         }
 
         let available_outputs = match gio::spawn_blocking(CompositorClient::query_outputs).await {
             Ok(Ok(outputs)) => outputs,
             Ok(Err(e)) => {
                 tracing::warn!(%e, "failed to query compositor outputs");
-                return output_matching::DisplayFilter::ShowAll;
+                return DisplayFilter::ShowAll;
             }
             Err(_) => {
                 tracing::error!("task spawning error");
-                return output_matching::DisplayFilter::ShowAll;
+                return DisplayFilter::ShowAll;
             }
         };
 
         if available_outputs.len() == 1 {
-            return output_matching::DisplayFilter::ShowAll;
+            return DisplayFilter::ShowAll;
         }
 
         let Some(gdk_window) = self.container.window() else {
             tracing::warn!("container has no GDK window");
-            return output_matching::DisplayFilter::ShowAll;
+            return DisplayFilter::ShowAll;
         };
 
         let display = gdk_window.display();
         let Some(monitor) = display.monitor_at_window(&gdk_window) else {
             tracing::warn!(display = ?gdk_window.display(), geometry = ?gdk_window.geometry(),
                 "no monitor found for window");
-            return output_matching::DisplayFilter::ShowAll;
+            return DisplayFilter::ShowAll;
         };
 
         available_outputs
             .into_iter()
             .find_map(|(output_name, output_info)| {
-                (output_matching::OutputMatcher::compare(&monitor, &output_info)
-                    == output_matching::OutputMatcher::all())
-                .then_some(output_matching::DisplayFilter::Only(output_name))
+                (OutputMatcher::compare(&monitor, &output_info)
+                    == OutputMatcher::all())
+                .then_some(DisplayFilter::Only(output_name))
             })
             .unwrap_or_else(|| {
                 tracing::warn!(?monitor, "no matching compositor output found");
-                output_matching::DisplayFilter::ShowAll
+                DisplayFilter::ShowAll
             })
     }
 
@@ -509,7 +565,7 @@ impl ModuleInstance {
     async fn handle_window_update(
         &mut self,
         snapshot: WindowSnapshot,
-        filter: Arc<Mutex<output_matching::DisplayFilter>>,
+        filter: Arc<Mutex<DisplayFilter>>,
     ) {
         self.update_output_and_resize();
 
@@ -635,7 +691,7 @@ impl ModuleInstance {
         tracing::debug!(count = pids_to_query.len(), "process info tick");
 
         for (wid, pid) in pids_to_query {
-            match process_info::query_foreground(pid) {
+            match proc_info::query_foreground(pid) {
                 Ok(info) => {
                     tracing::debug!(window_id = wid, pid, cwd = ?info.cwd, cmd = ?info.command, "proc query result");
                     if let Some(button) = self.buttons.get(&wid) {

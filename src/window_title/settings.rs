@@ -2,19 +2,33 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Deserializer};
 
-pub use crate::title_format::rules::{default_rules, TitleFormatRule};
+use super::parse::{default_rules, TitleFormatRule};
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct TitleDisplayConfig {
+    pub(crate) show_window_titles: bool,
+    pub(crate) truncate_titles: bool,
+    pub(crate) allow_title_linebreaks: bool,
+}
+
+impl Default for TitleDisplayConfig {
+    fn default() -> Self {
+        Self {
+            show_window_titles: true,
+            truncate_titles: true,
+            allow_title_linebreaks: false,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct TitleFormatConfig {
-    pub enabled: bool,
-    /// User-provided rules are merged on top of the built-in defaults,
-    /// so specifying a single rule (e.g. `foot`) does not erase the
-    /// other built-in rules (kitty, firefox, ...).
+    pub(crate) enabled: bool,
     #[serde(deserialize_with = "deserialize_rules_merged")]
-    pub rules: HashMap<String, TitleFormatRule>,
-    /// Interval in milliseconds for `/proc` polling of terminal foreground processes.
-    pub poll_interval_ms: u64,
+    pub(crate) rules: HashMap<String, TitleFormatRule>,
+    pub(crate) poll_interval_ms: u64,
 }
 
 fn deserialize_rules_merged<'de, D>(

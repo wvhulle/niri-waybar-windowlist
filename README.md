@@ -16,7 +16,7 @@ A Waybar CFFI module for managing windows in the [Niri](https://github.com/YaLTe
 
 ```bash
 cargo build --release
-# Output: target/release/libniri_window_buttons.so
+# Output: target/release/libniri_waybar_windowlist.so
 ```
 
 ## Configuration
@@ -27,7 +27,7 @@ Add to your Waybar config:
 {
   "modules-center": ["cffi/niri_window_buttons"],
   "cffi/niri_window_buttons": {
-    "module_path": "/path/to/libniri_window_buttons.so"
+    "module_path": "/path/to/libniri_waybar_windowlist.so"
   }
 }
 ```
@@ -194,6 +194,38 @@ Shows a speaker icon after the window title when the app is playing audio. Click
 ```
 
 For apps with multiple windows sharing a PID, the indicator is shown only on the focused window.
+
+### Title Formatting
+
+Custom title rendering with regex capture groups and Jinja2 templates. Built-in rules for terminals, browsers, and editors.
+
+```jsonc
+"title_format": {
+  "enabled": true,
+  "poll_interval_ms": 1000,
+  "rules": {
+    "foot": {
+      "pattern": "^(?P<cwd>.+?)(?:(?:\\s-\\s|>\\s?)(?P<cmd>.+))?$",
+      "format": "<i>{{ cwd | shorten_home }}</i>{% if cmd %} · {{ cmd }}{% endif %}",
+      "poll_proc": true
+    }
+  }
+}
+```
+
+Template filters: `shorten_home` (replace home dir with `~`), `basename` (file name only). When `poll_proc` is true, the module reads `/proc` for the terminal's foreground process instead of relying on the compositor title.
+
+## Development
+
+Build the module and launch a standalone waybar instance for quick preview:
+
+```bash
+cargo build && cargo run --bin test-waybar
+```
+
+Set `RUST_LOG=niri_waybar_windowlist=debug` for verbose logging to `~/.cache/window-list.log`.
+
+The codebase is organized into domain modules (`niri/`, `window_button/`, `window_list/`, `window_title/`, `app_icon/`, `right_click_menu/`, `mpris_indicator/`, `notification_bubble/`, `focus_urgent_indicator/`). Each module owns its configuration types in a local `settings.rs`, aggregated by `settings/mod.rs` for JSON deserialization.
 
 ## Limitations
 

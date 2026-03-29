@@ -36,7 +36,7 @@ impl OutputMatcher {
 
         result.set(
             OutputMatcher::GEOMETRY,
-            MonitorGeometry::from_gdk(monitor) == MonitorGeometry::from_niri(logical_output),
+            MonitorGeometry::from(monitor) == MonitorGeometry::from(logical_output),
         );
 
         result.set(
@@ -69,8 +69,8 @@ struct MonitorGeometry {
     y: i32,
 }
 
-impl MonitorGeometry {
-    fn from_gdk(monitor: &Monitor) -> Self {
+impl From<&Monitor> for MonitorGeometry {
+    fn from(monitor: &Monitor) -> Self {
         let geom = monitor.geometry();
         let scale = monitor.scale_factor();
 
@@ -81,9 +81,18 @@ impl MonitorGeometry {
             y: geom.y() * scale,
         }
     }
+}
 
-    fn from_niri(logical: &LogicalOutput) -> Self {
-        let scale = i32::try_from(logical.scale.ceil() as i64).unwrap_or(1);
+impl From<&LogicalOutput> for MonitorGeometry {
+    fn from(logical: &LogicalOutput) -> Self {
+        let scale = logical.scale.ceil().max(1.0);
+        let scale = match scale {
+            s if (s - 1.0).abs() < f64::EPSILON => 1,
+            s if (s - 2.0).abs() < f64::EPSILON => 2,
+            s if (s - 3.0).abs() < f64::EPSILON => 3,
+            s if (s - 4.0).abs() < f64::EPSILON => 4,
+            _ => 1,
+        };
 
         Self {
             width: logical.width.cast_signed() * scale,

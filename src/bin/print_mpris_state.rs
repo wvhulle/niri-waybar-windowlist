@@ -1,6 +1,8 @@
+use std::io;
+
 use futures::StreamExt;
-use niri_waybar_windowlist::audio::PlaybackStatus;
-use tracing_subscriber::EnvFilter;
+use niri_waybar_windowlist::mpris_indicator::{self, AudioState, PlaybackStatus};
+use tracing_subscriber::{fmt::time::uptime, EnvFilter};
 use waybar_cffi::gtk::glib;
 
 fn status_symbol(status: PlaybackStatus) -> &'static str {
@@ -11,7 +13,7 @@ fn status_symbol(status: PlaybackStatus) -> &'static str {
     }
 }
 
-fn print_state(state: &niri_waybar_windowlist::audio::AudioState) {
+fn print_state(state: &AudioState) {
     print!("\x1B[2J\x1B[H");
     println!("MPRIS Player Monitor\n");
 
@@ -44,13 +46,13 @@ fn main() {
             EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| EnvFilter::new("niri_waybar_windowlist=debug")),
         )
-        .with_timer(tracing_subscriber::fmt::time::uptime())
-        .with_writer(std::io::stderr)
+        .with_timer(uptime())
+        .with_writer(io::stderr)
         .init();
 
     let ctx = glib::MainContext::default();
     ctx.block_on(async {
-        let (_monitor, stream) = niri_waybar_windowlist::audio::start();
+        let (_monitor, stream) = mpris_indicator::start();
 
         let mut stream = Box::pin(stream);
         while let Some(state) = stream.next().await {
