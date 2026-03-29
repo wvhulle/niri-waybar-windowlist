@@ -40,60 +40,52 @@ pub fn setup_icon_rendering(
     }
     container.pack_start(&audio_eb, false, false, 0);
 
-    // Load and insert the icon once the widget is realized (so scale_factor is available).
+    // Load and insert the icon once the widget is realized (so scale_factor is
+    // available).
     let icon_inserted = Rc::new(Cell::new(false));
-    event_box
-        .connect_size_allocate(move |button, _allocation| {
-            if icon_inserted.get() {
-                return;
-            }
-            icon_inserted.set(true);
-            tracing::info!("icon insertion triggered for size_allocate (one-time)");
+    event_box.connect_size_allocate(move |button, _allocation| {
+        if icon_inserted.get() {
+            return;
+        }
+        icon_inserted.set(true);
+        tracing::debug!("icon insertion triggered for size_allocate (one-time)");
 
-            let dimension = icon_size;
+        let dimension = icon_size;
 
-            let icon_image = load_icon_image(icon_path.as_ref(), button, dimension)
-                .unwrap_or_else(|| {
-                    static FALLBACK: &str = "application-x-executable";
+        let icon_image =
+            load_icon_image(icon_path.as_ref(), button, dimension).unwrap_or_else(|| {
+                static FALLBACK: &str = "application-x-executable";
 
-                    ICON_THEME_INSTANCE
-                        .with(|theme| {
-                            theme.lookup_icon_for_scale(
-                                FALLBACK,
-                                dimension,
-                                button.scale_factor(),
-                                IconLookupFlags::empty(),
-                            )
-                        })
-                        .and_then(|info| {
-                            load_icon_image(
-                                info.filename().as_ref(),
-                                button,
-                                dimension,
-                            )
-                        })
-                        .unwrap_or_else(|| {
-                            gtk::Image::from_icon_name(Some(FALLBACK), IconSize::Button)
-                        })
-                });
-
-            // Insert icon at the front, before the label.
-            let container_copy = container.clone();
-            let audio_copy = audio_eb.clone();
-            let audio_vis_copy = audio_vis.clone();
-            let button_copy = button.clone();
-            idle_add_local_once(move || {
-                container_copy.pack_start(&icon_image, false, false, 0);
-                container_copy.reorder_child(&icon_image, 0);
-
-                container_copy.show_all();
-                button_copy.show_all();
-
-                if audio_vis_copy.get() {
-                    audio_copy.show();
-                }
+                ICON_THEME_INSTANCE
+                    .with(|theme| {
+                        theme.lookup_icon_for_scale(
+                            FALLBACK,
+                            dimension,
+                            button.scale_factor(),
+                            IconLookupFlags::empty(),
+                        )
+                    })
+                    .and_then(|info| load_icon_image(info.filename().as_ref(), button, dimension))
+                    .unwrap_or_else(|| gtk::Image::from_icon_name(Some(FALLBACK), IconSize::Button))
             });
+
+        // Insert icon at the front, before the label.
+        let container_copy = container.clone();
+        let audio_copy = audio_eb.clone();
+        let audio_vis_copy = audio_vis.clone();
+        let button_copy = button.clone();
+        idle_add_local_once(move || {
+            container_copy.pack_start(&icon_image, false, false, 0);
+            container_copy.reorder_child(&icon_image, 0);
+
+            container_copy.show_all();
+            button_copy.show_all();
+
+            if audio_vis_copy.get() {
+                audio_copy.show();
+            }
         });
+    });
 }
 
 pub fn load_icon_image(
@@ -107,7 +99,7 @@ pub fn load_icon_image(
         |p| match Pixbuf::from_file_at_scale(p, scaled_size, scaled_size, true) {
             Ok(pixbuf) => Some(pixbuf),
             Err(e) => {
-                tracing::info!(%e, ?p, "icon load failed");
+                tracing::warn!(%e, path = %p.display(), "icon load failed");
                 None
             }
         },

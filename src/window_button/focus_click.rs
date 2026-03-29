@@ -1,31 +1,29 @@
 use std::{
     cell::{Cell, RefCell},
+    collections::hash_map::Entry,
     process::Command,
     rc::Rc,
     thread,
     time::{Duration, Instant},
 };
 
+use gtk::glib::Propagation;
 use waybar_cffi::gtk::{
     self as gtk,
     gdk::{self, ScrollDirection},
     prelude::{Cast, ContainerExt, WidgetExt},
 };
 
-use super::WindowButton;
+use super::{
+    hover_mouse::set_background_color,
+    settings::{ClickAction, ClickActions, MultiSelectAction, WindowAction},
+    WindowButton,
+};
 use crate::{
     niri::border_colors::IndicatorColor,
     window_list::{clear_selection, FocusedWindow},
     SharedState,
 };
-
-use super::settings::{ClickAction, ClickActions, MultiSelectAction, WindowAction};
-
-use super::hover_mouse::set_background_color;
-
-use std::collections::hash_map::Entry;
-
-use gtk::glib::Propagation;
 
 impl WindowButton {
     pub(crate) fn setup_click_handlers(&self, window_id: u64) {
@@ -59,7 +57,7 @@ impl WindowButton {
                     let title_ref = title_release.borrow();
                     let title_str = title_ref.as_deref();
                     let actions = state_release
-                        .settings()
+                        .settings
                         .get_click_actions(app_id_ref, title_str);
 
                     if is_currently_focused {
@@ -130,14 +128,12 @@ impl WindowButton {
                 1 => {
                     let modifier_held = Self::check_modifier_from_event(
                         event,
-                        state_press.settings().multi_select_modifier(),
+                        state_press.settings.multi_select_modifier(),
                     );
                     if modifier_held {
                         *skip_press.borrow_mut() = true;
                         let mut sel = selection_press.borrow_mut();
-                        if let Entry::Vacant(e) =
-                            sel.entry(window_id)
-                        {
+                        if let Entry::Vacant(e) = sel.entry(window_id) {
                             e.insert(event_box_press.clone());
                             set_background_color(&event_box_press, Some(&selected_bg));
                         } else {
@@ -160,7 +156,7 @@ impl WindowButton {
                             let title_ref = title_press.borrow();
                             let title_str = title_ref.as_deref();
                             let actions = state_press
-                                .settings()
+                                .settings
                                 .get_click_actions(app_id_ref, title_str);
                             execute_click_action(
                                 &state_press,
@@ -226,7 +222,7 @@ impl WindowButton {
             let title_ref = title_scroll.borrow();
             let title_str = title_ref.as_deref();
             let actions = state_scroll
-                .settings()
+                .settings
                 .get_click_actions(app_id_ref, title_str);
 
             let action = match event.direction() {
@@ -274,7 +270,7 @@ impl WindowButton {
             }
         }
 
-        let colors = state.border_colors();
+        let colors = *state.border_colors.lock().unwrap();
         indicator_color.set(Some(colors.active));
         btn.queue_draw();
         focused_window.set(Some(window_id));
@@ -291,7 +287,7 @@ fn execute_or_show_menu(
 ) {
     let title_ref = title.borrow();
     let title_str = title_ref.as_deref();
-    let actions = state.settings().get_click_actions(app_id, title_str);
+    let actions = state.settings.get_click_actions(app_id, title_str);
     let action = pick(&actions);
     if action.is_menu() {
         button.display_context_menu(window_id);
@@ -325,73 +321,67 @@ pub(crate) fn execute_action(
     _title: Option<&str>,
 ) {
     let result = match action {
-        WindowAction::FocusWindow => state.compositor().focus_window(window_id),
-        WindowAction::CloseWindow => state.compositor().close_window(window_id),
-        WindowAction::MaximizeColumn => state.compositor().maximize_window_column(window_id),
-        WindowAction::MaximizeWindowToEdges => {
-            state.compositor().maximize_window_to_edges(window_id)
+        WindowAction::FocusWindow => state.compositor.focus_window(window_id),
+        WindowAction::CloseWindow => state.compositor.close_window(window_id),
+        WindowAction::MaximizeColumn => state.compositor.maximize_window_column(window_id),
+        WindowAction::MaximizeWindowToEdges => state.compositor.maximize_window_to_edges(window_id),
+        WindowAction::CenterColumn => state.compositor.center_column(window_id),
+        WindowAction::CenterWindow => state.compositor.center_window(window_id),
+        WindowAction::CenterVisibleColumns => state.compositor.center_visible_columns(window_id),
+        WindowAction::ExpandColumnToAvailableWidth => {
+            state.compositor.expand_column_to_available_width(window_id)
         }
-        WindowAction::CenterColumn => state.compositor().center_column(window_id),
-        WindowAction::CenterWindow => state.compositor().center_window(window_id),
-        WindowAction::CenterVisibleColumns => {
-            state.compositor().center_visible_columns(window_id)
-        }
-        WindowAction::ExpandColumnToAvailableWidth => state
-            .compositor()
-            .expand_column_to_available_width(window_id),
-        WindowAction::FullscreenWindow => state.compositor().fullscreen_window(window_id),
+        WindowAction::FullscreenWindow => state.compositor.fullscreen_window(window_id),
         WindowAction::ToggleWindowedFullscreen => {
-            state.compositor().toggle_windowed_fullscreen(window_id)
+            state.compositor.toggle_windowed_fullscreen(window_id)
         }
-        WindowAction::ToggleWindowFloating => state.compositor().toggle_floating(window_id),
+        WindowAction::ToggleWindowFloating => state.compositor.toggle_floating(window_id),
         WindowAction::ConsumeWindowIntoColumn => {
-            state.compositor().consume_window_into_column(window_id)
+            state.compositor.consume_window_into_column(window_id)
         }
-        WindowAction::ExpelWindowFromColumn => {
-            state.compositor().expel_window_from_column(window_id)
-        }
-        WindowAction::ResetWindowHeight => state.compositor().reset_window_height(window_id),
+        WindowAction::ExpelWindowFromColumn => state.compositor.expel_window_from_column(window_id),
+        WindowAction::ResetWindowHeight => state.compositor.reset_window_height(window_id),
         WindowAction::SwitchPresetColumnWidth => {
-            state.compositor().switch_preset_column_width(window_id)
+            state.compositor.switch_preset_column_width(window_id)
         }
         WindowAction::SwitchPresetWindowHeight => {
-            state.compositor().switch_preset_window_height(window_id)
+            state.compositor.switch_preset_window_height(window_id)
         }
         WindowAction::MoveWindowToWorkspaceDown => {
-            state.compositor().move_window_to_workspace_down(window_id)
+            state.compositor.move_window_to_workspace_down(window_id)
         }
         WindowAction::MoveWindowToWorkspaceUp => {
-            state.compositor().move_window_to_workspace_up(window_id)
+            state.compositor.move_window_to_workspace_up(window_id)
         }
         WindowAction::MoveWindowToMonitorLeft => {
-            state.compositor().move_window_to_monitor_left(window_id)
+            state.compositor.move_window_to_monitor_left(window_id)
         }
         WindowAction::MoveWindowToMonitorRight => {
-            state.compositor().move_window_to_monitor_right(window_id)
+            state.compositor.move_window_to_monitor_right(window_id)
         }
         WindowAction::ToggleColumnTabbedDisplay => {
-            state.compositor().toggle_column_tabbed_display(window_id)
+            state.compositor.toggle_column_tabbed_display(window_id)
         }
         WindowAction::FocusWorkspacePrevious => {
-            state.compositor().focus_workspace_previous(window_id)
+            state.compositor.focus_workspace_previous(window_id)
         }
-        WindowAction::MoveColumnLeft => state.compositor().move_column_left(window_id),
-        WindowAction::MoveColumnRight => state.compositor().move_column_right(window_id),
-        WindowAction::MoveColumnToFirst => state.compositor().move_column_to_first(window_id),
-        WindowAction::MoveColumnToLast => state.compositor().move_column_to_last(window_id),
-        WindowAction::MoveWindowDown => state.compositor().move_window_down(window_id),
-        WindowAction::MoveWindowUp => state.compositor().move_window_up(window_id),
+        WindowAction::MoveColumnLeft => state.compositor.move_column_left(window_id),
+        WindowAction::MoveColumnRight => state.compositor.move_column_right(window_id),
+        WindowAction::MoveColumnToFirst => state.compositor.move_column_to_first(window_id),
+        WindowAction::MoveColumnToLast => state.compositor.move_column_to_last(window_id),
+        WindowAction::MoveWindowDown => state.compositor.move_window_down(window_id),
+        WindowAction::MoveWindowUp => state.compositor.move_window_up(window_id),
         WindowAction::MoveWindowDownOrToWorkspaceDown => state
-            .compositor()
+            .compositor
             .move_window_down_or_to_workspace_down(window_id),
         WindowAction::MoveWindowUpOrToWorkspaceUp => state
-            .compositor()
+            .compositor
             .move_window_up_or_to_workspace_up(window_id),
         WindowAction::MoveColumnLeftOrToMonitorLeft => state
-            .compositor()
+            .compositor
             .move_column_left_or_to_monitor_left(window_id),
         WindowAction::MoveColumnRightOrToMonitorRight => state
-            .compositor()
+            .compositor
             .move_column_right_or_to_monitor_right(window_id),
         WindowAction::None | WindowAction::Menu => return,
     };
@@ -426,42 +416,38 @@ pub(crate) fn execute_multi_select_action(
 ) {
     for &window_id in window_ids {
         let result = match action {
-            MultiSelectAction::CloseWindows => state.compositor().close_window(window_id),
+            MultiSelectAction::CloseWindows => state.compositor.close_window(window_id),
             MultiSelectAction::MoveToWorkspaceUp => {
-                state.compositor().move_window_to_workspace_up(window_id)
+                state.compositor.move_window_to_workspace_up(window_id)
             }
             MultiSelectAction::MoveToWorkspaceDown => {
-                state.compositor().move_window_to_workspace_down(window_id)
+                state.compositor.move_window_to_workspace_down(window_id)
             }
             MultiSelectAction::MoveToMonitorLeft => {
-                state.compositor().move_window_to_monitor_left(window_id)
+                state.compositor.move_window_to_monitor_left(window_id)
             }
             MultiSelectAction::MoveToMonitorRight => {
-                state.compositor().move_window_to_monitor_right(window_id)
+                state.compositor.move_window_to_monitor_right(window_id)
             }
             MultiSelectAction::MoveToMonitorUp => {
-                state.compositor().move_window_to_monitor_up(window_id)
+                state.compositor.move_window_to_monitor_up(window_id)
             }
             MultiSelectAction::MoveToMonitorDown => {
-                state.compositor().move_window_to_monitor_down(window_id)
+                state.compositor.move_window_to_monitor_down(window_id)
             }
-            MultiSelectAction::MoveColumnLeft => state.compositor().move_column_left(window_id),
-            MultiSelectAction::MoveColumnRight => {
-                state.compositor().move_column_right(window_id)
-            }
-            MultiSelectAction::ToggleFloating => state.compositor().toggle_floating(window_id),
-            MultiSelectAction::FullscreenWindows => {
-                state.compositor().fullscreen_window(window_id)
-            }
+            MultiSelectAction::MoveColumnLeft => state.compositor.move_column_left(window_id),
+            MultiSelectAction::MoveColumnRight => state.compositor.move_column_right(window_id),
+            MultiSelectAction::ToggleFloating => state.compositor.toggle_floating(window_id),
+            MultiSelectAction::FullscreenWindows => state.compositor.fullscreen_window(window_id),
             MultiSelectAction::MaximizeColumns => {
-                state.compositor().maximize_window_column(window_id)
+                state.compositor.maximize_window_column(window_id)
             }
-            MultiSelectAction::CenterColumns => state.compositor().center_column(window_id),
+            MultiSelectAction::CenterColumns => state.compositor.center_column(window_id),
             MultiSelectAction::ConsumeIntoColumn => {
-                state.compositor().consume_window_into_column(window_id)
+                state.compositor.consume_window_into_column(window_id)
             }
             MultiSelectAction::ToggleTabbedDisplay => {
-                state.compositor().toggle_column_tabbed_display(window_id)
+                state.compositor.toggle_column_tabbed_display(window_id)
             }
         };
         if let Err(e) = result {

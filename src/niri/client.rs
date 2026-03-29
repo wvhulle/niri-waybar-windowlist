@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use niri_ipc::{Action, Output, Request};
 
-use super::{event_stream::NiriEventStream, send_request, validate_handled};
-use crate::{settings::Settings, CompositorIpcError};
+use super::{event_stream::NiriEventStream, send_request, validate_handled, CompositorIpcError};
+use crate::settings::Settings;
 
 #[derive(Debug, Clone)]
 pub struct CompositorClient {
@@ -304,11 +304,11 @@ impl CompositorClient {
             return Ok(());
         }
 
-        tracing::info!(
-            "repositioning window {} by {} columns (keep_stacked: {})",
+        tracing::debug!(
             window_id,
             position_delta,
-            keep_stacked
+            keep_stacked,
+            "repositioning window"
         );
 
         let response = send_request(Request::Windows)?;

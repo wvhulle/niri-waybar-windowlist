@@ -1,5 +1,7 @@
-use std::collections::{BTreeMap, HashMap};
-use std::path::Path;
+use std::{
+    collections::{BTreeMap, HashMap},
+    path::Path,
+};
 
 use minijinja::{AutoEscape, Environment};
 use regex::Regex;
@@ -63,7 +65,10 @@ pub fn default_rules() -> HashMap<String, TitleFormatRule> {
     [
         // Terminals (poll /proc for foreground process info)
         ("foot", terminal_rule(terminal_pattern, terminal_format)),
-        ("Alacritty", terminal_rule(terminal_pattern, terminal_format)),
+        (
+            "Alacritty",
+            terminal_rule(terminal_pattern, terminal_format),
+        ),
         // Kitty in single-instance mode shares one PID across all OS windows,
         // so /proc polling yields identical stale data. Rely on the compositor
         // title instead (set via `kitty @ set-window-title`).

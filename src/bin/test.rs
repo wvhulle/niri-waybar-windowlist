@@ -4,25 +4,38 @@ use std::{
     process::{self, Command},
 };
 
-fn find_library() -> PathBuf {
-    // Check common build output locations
+fn build_library() -> PathBuf {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let manifest_path = Path::new(manifest_dir).join("Cargo.toml");
     let target_dir = Path::new(manifest_dir).join("target");
 
-    for profile in ["debug", "release"] {
-        let candidate = target_dir.join(profile).join("libniri_waybar_windowlist.so");
-        if candidate.exists() {
-            return candidate;
-        }
+    eprintln!("building library...");
+    let status = Command::new("cargo")
+        .arg("build")
+        .arg("--lib")
+        .arg("--manifest-path")
+        .arg(&manifest_path)
+        .status()
+        .expect("failed to run cargo build — is cargo installed?");
+
+    if !status.success() {
+        eprintln!("cargo build failed with: {status}");
+        process::exit(status.code().unwrap_or(1));
     }
 
-    eprintln!("error: libniri_waybar_windowlist.so not found in target/debug or target/release");
-    eprintln!("hint: run `cargo build` first");
-    process::exit(1);
+    let lib_path = target_dir
+        .join("debug")
+        .join("libniri_waybar_windowlist.so");
+    if !lib_path.exists() {
+        eprintln!("error: {} not found after build", lib_path.display());
+        process::exit(1);
+    }
+
+    lib_path
 }
 
 fn main() {
-    let lib_path = find_library();
+    let lib_path = build_library();
     eprintln!("using library: {}", lib_path.display());
 
     let tmp_dir = env::temp_dir().join("waybar-windowlist-test");
@@ -72,7 +85,10 @@ window#waybar {
         .arg(&config_path)
         .arg("--style")
         .arg(&style_path)
-        .env("RUST_LOG", env::var("RUST_LOG").unwrap_or_else(|_| "niri_waybar_windowlist=info".into()))
+        .env(
+            "RUST_LOG",
+            env::var("RUST_LOG").unwrap_or_else(|_| "niri_waybar_windowlist=trace".into()),
+        )
         .status()
         .expect("failed to start waybar — is it installed?");
 

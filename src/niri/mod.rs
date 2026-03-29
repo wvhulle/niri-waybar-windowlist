@@ -1,19 +1,19 @@
-mod tracker;
 pub(crate) mod settings;
+mod tracker;
 
 pub mod border_colors;
 pub mod client;
+pub mod error;
 pub mod event_stream;
 pub mod output_matching;
 
 use std::ops::Deref;
 
 pub use client::CompositorClient;
+pub use error::CompositorIpcError;
 use niri_ipc::{socket::Socket, Reply, Request};
 
-use crate::CompositorIpcError;
-
-// ── IPC helpers (from ipc.rs) ──
+// ── IPC helpers ──
 
 #[tracing::instrument(level = "TRACE", err)]
 pub(crate) fn send_request(request: Request) -> Result<Reply, CompositorIpcError> {
@@ -35,13 +35,13 @@ pub(crate) fn validate_handled(response: Reply) -> Result<(), CompositorIpcError
     }
 }
 
-// ── WindowInfo (from window_info.rs) ──
+// ── WindowInfo ──
 
 pub type WindowSnapshot = Vec<WindowInfo>;
 
 #[derive(Debug, Clone)]
 pub struct WindowInfo {
-    pub(crate) inner: niri_ipc::Window,
+    pub(crate) window: niri_ipc::Window,
     pub(crate) output_name: Option<String>,
 }
 
@@ -55,6 +55,6 @@ impl Deref for WindowInfo {
     type Target = niri_ipc::Window;
 
     fn deref(&self) -> &Self::Target {
-        &self.inner
+        &self.window
     }
 }

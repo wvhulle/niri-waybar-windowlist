@@ -1,7 +1,9 @@
-use waybar_cffi::gtk::{self as gtk, prelude::{LabelExt, WidgetExt}};
+use waybar_cffi::gtk::{
+    self as gtk,
+    prelude::{LabelExt, WidgetExt},
+};
 
-use super::PlaybackStatus;
-use super::settings::AudioIndicatorConfig;
+use super::{settings::AudioIndicatorConfig, PlaybackStatus};
 
 pub fn update_audio_state(
     audio_event_box: &gtk::EventBox,

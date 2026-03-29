@@ -1,8 +1,9 @@
-use std::cell::RefCell;
-use std::collections::BTreeMap;
-use std::rc::Rc;
+use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
 
-use waybar_cffi::gtk::{self as gtk, prelude::{LabelExt, WidgetExt}};
+use waybar_cffi::gtk::{
+    self as gtk,
+    prelude::{LabelExt, WidgetExt},
+};
 
 use super::parse::render_with_rule;
 use crate::settings::Settings;
@@ -10,7 +11,7 @@ use crate::settings::Settings;
 pub fn update_title(
     title_label: &gtk::Label,
     title_store: &Rc<RefCell<Option<String>>>,
-    window_id: u64,
+    _window_id: u64,
     app_id: Option<&str>,
     settings: &Settings,
     display_titles: bool,
@@ -33,12 +34,6 @@ pub fn update_title(
                     .collect();
 
                 if let Some(markup) = render_with_rule(rule, &capture_names) {
-                    tracing::info!(
-                        window_id,
-                        markup = %markup,
-                        has_parent = title_label.parent().is_some(),
-                        "set_markup on title label"
-                    );
                     title_label.set_markup(&markup);
                     title_label.show();
                     return;
@@ -54,16 +49,9 @@ pub fn update_title(
             } else {
                 text.replace(['\n', '\r'], " ")
             };
-            tracing::info!(
-                window_id,
-                display_text = %display_text,
-                has_parent = title_label.parent().is_some(),
-                "set_text on title label"
-            );
             title_label.set_text(&display_text);
             title_label.show();
         } else {
-            tracing::info!(window_id, "clearing title label");
             title_label.set_text("");
             title_label.hide();
         }

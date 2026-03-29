@@ -1,4 +1,4 @@
-use std::{ops::Deref, time::Duration};
+use std::ops::Deref;
 
 use async_channel::Sender;
 use futures::{Stream, StreamExt, TryStreamExt};
@@ -7,7 +7,7 @@ use serde::{Deserialize, Deserializer};
 use thiserror::Error;
 use waybar_cffi::gtk::glib;
 use zbus::{
-    fdo::{self, MonitoringProxy},
+    fdo::{self, DBusProxy, MonitoringProxy},
     names::{self as zbus_names, InterfaceName, MemberName},
     zvariant::{DeserializeDict, Optional, Type},
     Connection, MatchRule, Message, MessageStream,
@@ -28,14 +28,16 @@ enum NotificationError {
     ChannelClosed,
 }
 
-mod pid_cache;
 pub(crate) mod settings;
+pub(crate) mod style;
 
-pub(crate) async fn forward_events(tx: Sender<crate::EventMessage>) {
+pub(crate) async fn forward_events(tx: Sender<crate::waybar_module::EventMessage>) {
     let mut stream = Box::pin(create_stream());
     while let Some(notification) = StreamExt::next(&mut stream).await {
         if let Err(e) = tx
-            .send(crate::EventMessage::Notification(Box::new(notification)))
+            .send(crate::waybar_module::EventMessage::Notification(Box::new(
+                notification,
+            )))
             .await
         {
             tracing::error!(%e, "failed to forward notification");
@@ -146,6 +148,7 @@ impl<'de> Deserialize<'de> for ActionList {
 pub struct HintData {
     pub desktop_entry: Option<String>,
     pub sender_pid: Option<i64>,
+    pub urgency: Option<u8>,
 }
 
 static NOTIFICATION_INTERFACE: &str = "org.freedesktop.Notifications";
@@ -153,10 +156,13 @@ static NOTIFY_METHOD: &str = "Notify";
 
 #[tracing::instrument(level = "TRACE", skip_all, err)]
 async fn run_monitor(tx: Sender<NotificationData>) -> Result<(), NotificationError> {
-    let pid_resolver = pid_cache::PidCache::create(Duration::from_secs(86400));
+    // Separate connection for PID lookups (the monitor connection cannot make
+    // method calls).
+    let lookup_connection = Connection::session().await?;
+    let dbus_proxy = DBusProxy::new(&lookup_connection).await?;
 
-    let connection = Connection::session().await?;
-    let monitor_proxy = MonitoringProxy::new(&connection).await?;
+    let monitor_connection = Connection::session().await?;
+    let monitor_proxy = MonitoringProxy::new(&monitor_connection).await?;
     monitor_proxy
         .become_monitor(
             &[MatchRule::builder()
@@ -168,10 +174,10 @@ async fn run_monitor(tx: Sender<NotificationData>) -> Result<(), NotificationErr
         .await?;
 
     tracing::info!("notification monitor connected");
-    let mut message_stream = MessageStream::from(connection);
+    let mut message_stream = MessageStream::from(monitor_connection);
     while let Some(msg) = message_stream.try_next().await? {
-        if let Err(e) = handle_message(&tx, &pid_resolver, &msg).await {
-            tracing::error!(%e, ?msg, "notification processing failed");
+        if let Err(e) = handle_message(&tx, &dbus_proxy, &msg).await {
+            tracing::error!(%e, "notification processing failed");
         }
     }
 
@@ -180,20 +186,26 @@ async fn run_monitor(tx: Sender<NotificationData>) -> Result<(), NotificationErr
 
 async fn handle_message(
     tx: &Sender<NotificationData>,
-    pid_resolver: &pid_cache::PidCache,
+    dbus_proxy: &DBusProxy<'_>,
     msg: &Message,
 ) -> Result<(), NotificationError> {
     if msg.header().interface() == Some(&InterfaceName::from_static_str(NOTIFICATION_INTERFACE)?)
         && msg.header().member() == Some(&MemberName::from_static_str(NOTIFY_METHOD)?)
     {
-        let process_id = if let Some(sender) = msg.header().sender() {
-            pid_resolver.query(sender).await
-        } else {
-            None
-        };
+        let process_id = resolve_sender_pid(dbus_proxy, msg).await;
+        let notification: NotificationContent = msg.body().deserialize()?;
+
+        tracing::debug!(
+            app_name = ?notification.app_name,
+            summary = %notification.summary,
+            desktop_entry = ?notification.hints.desktop_entry,
+            hint_pid = ?notification.hints.sender_pid,
+            ?process_id,
+            "received notification"
+        );
 
         tx.send(NotificationData {
-            notification: msg.body().deserialize()?,
+            notification,
             process_id,
         })
         .await
@@ -201,4 +213,21 @@ async fn handle_message(
     }
 
     Ok(())
+}
+
+/// Resolve the PID of the D-Bus sender immediately to minimise the race
+/// window between receiving the monitored message and the sender disconnecting.
+async fn resolve_sender_pid(dbus_proxy: &DBusProxy<'_>, msg: &Message) -> Option<u32> {
+    let header = msg.header();
+    let sender = header.sender()?;
+    match dbus_proxy
+        .get_connection_unix_process_id(sender.clone().into())
+        .await
+    {
+        Ok(pid) => Some(pid),
+        Err(e) => {
+            tracing::trace!(%e, %sender, "sender PID lookup failed (sender may have disconnected)");
+            None
+        }
+    }
 }

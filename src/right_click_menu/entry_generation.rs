@@ -1,14 +1,15 @@
-use std::process::Command;
-use std::thread;
+use std::{process::Command, thread};
 
-use waybar_cffi::gtk::prelude::{GtkMenuExt, GtkMenuItemExt, MenuShellExt, WidgetExt};
-use waybar_cffi::gtk::{Menu, MenuItem};
-
-use crate::window_button::focus_click::{
-    execute_action, execute_command, execute_multi_select_action,
+use waybar_cffi::gtk::{
+    prelude::{GtkMenuExt, GtkMenuItemExt, MenuShellExt, WidgetExt},
+    Menu, MenuItem,
 };
-use crate::window_list::{clear_selection, SelectionState};
-use crate::SharedState;
+
+use crate::{
+    window_button::focus_click::{execute_action, execute_command, execute_multi_select_action},
+    window_list::{clear_selection, SelectionState},
+    SharedState,
+};
 
 pub(crate) fn display_context_menu(
     state: &SharedState,
@@ -19,7 +20,7 @@ pub(crate) fn display_context_menu(
     let menu = Menu::new();
     menu.set_reserve_toggle_size(false);
 
-    let menu_items = state.settings().context_menu();
+    let menu_items = state.settings.context_menu();
 
     for menu_item in menu_items {
         let item = MenuItem::with_label(&menu_item.label);
@@ -43,14 +44,11 @@ pub(crate) fn display_context_menu(
     menu.popup_at_pointer(None);
 }
 
-pub(crate) fn display_multi_select_menu(
-    state: &SharedState,
-    selection: &SelectionState,
-) {
+pub(crate) fn display_multi_select_menu(state: &SharedState, selection: &SelectionState) {
     let menu = Menu::new();
     menu.set_reserve_toggle_size(false);
 
-    let menu_items = state.settings().multi_select_menu();
+    let menu_items = state.settings.multi_select_menu();
     let selected_windows: Vec<u64> = selection.borrow().keys().copied().collect();
 
     for menu_item in menu_items {

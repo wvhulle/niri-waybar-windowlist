@@ -1,5 +1,4 @@
-use std::path::Path;
-use std::time::Duration;
+use std::{path::Path, time::Duration};
 
 use futures::{io, AsyncReadExt};
 use procfs::process::Process;
@@ -9,7 +8,7 @@ use waybar_cffi::gtk::{
     glib::{self, Priority},
 };
 
-use crate::EventMessage;
+use crate::waybar_module::EventMessage;
 
 pub struct ProcessInfo {
     pub parent_id: Option<i64>,
@@ -59,7 +58,8 @@ pub struct ForegroundProcessInfo {
     pub command: Option<String>,
 }
 
-/// Query the foreground process of a terminal window identified by `terminal_pid`.
+/// Query the foreground process of a terminal window identified by
+/// `terminal_pid`.
 ///
 /// Walks the process tree to find the foreground process group leader,
 /// then reads its cwd and command name.
@@ -161,10 +161,7 @@ pub enum ProcessError {
     },
 }
 
-pub(crate) async fn forward_poll_ticks(
-    tx: async_channel::Sender<EventMessage>,
-    interval_ms: u64,
-) {
+pub(crate) async fn forward_poll_ticks(tx: async_channel::Sender<EventMessage>, interval_ms: u64) {
     loop {
         glib::timeout_future(Duration::from_millis(interval_ms)).await;
         if let Err(e) = tx.send(EventMessage::ProcessInfoTick).await {

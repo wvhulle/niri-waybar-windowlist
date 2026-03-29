@@ -242,8 +242,7 @@ impl Settings {
     }
 
     pub fn proc_poll_interval(&self) -> Option<u64> {
-        if self.title_format.enabled
-            && self.title_format.rules.values().any(|rule| rule.poll_proc)
+        if self.title_format.enabled && self.title_format.rules.values().any(|rule| rule.poll_proc)
         {
             Some(self.title_format.poll_interval_ms)
         } else {

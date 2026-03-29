@@ -13,17 +13,19 @@ use waybar_cffi::gtk::{
     self as gtk, gdk,
     glib::SourceId,
     pango::{AttrInt, AttrList, EllipsizeMode, Weight},
-    prelude::{ContainerExt, EventBoxExt, LabelExt, WidgetExt, WidgetExtManual},
+    prelude::{BoxExt, ContainerExt, EventBoxExt, LabelExt, WidgetExt, WidgetExtManual},
     EventBox, Orientation,
 };
 
 use crate::{
     app_icon::style::{setup_icon_rendering, IconRenderingParams},
-    focus_urgent_indicator::style::{
-        mark_urgent, setup_border_indicator, update_focus, update_urgent,
-    },
+    focus_urgent_indicator::style::{setup_border_indicator, update_focus, update_window_urgency},
     mpris_indicator::{style::update_audio_state, PlaybackStatus},
     niri::border_colors::IndicatorColor,
+    notification_bubble::style::{
+        clear_notification_urgent, create_notification_bubble, mark_notification_urgent,
+        NotificationUrgency,
+    },
     window_list::{FocusedWindow, SelectionState},
     window_title::style::{update_process_info, update_title},
     SharedState,
@@ -46,7 +48,10 @@ pub struct WindowButton {
     pub(crate) tooltip_timeout: Rc<RefCell<Option<SourceId>>>,
     pub(crate) skip_clicked: Rc<RefCell<bool>>,
     pub(crate) indicator_color: Rc<Cell<Option<IndicatorColor>>>,
-    pub(crate) is_urgent: Cell<bool>,
+    pub(crate) window_urgency: Cell<bool>,
+    pub(crate) notification_urgency: Cell<bool>,
+    pub(crate) notification_bubble: gtk::DrawingArea,
+    pub(crate) bubble_urgency: Rc<Cell<NotificationUrgency>>,
 }
 
 impl Debug for WindowButton {
@@ -68,9 +73,9 @@ impl WindowButton {
         focused_window: FocusedWindow,
     ) -> Self {
         let state_clone = state.clone();
-        let display_titles = state.settings().show_window_titles();
+        let display_titles = state.settings.show_window_titles();
 
-        let icon_gap = state.settings().icon_spacing();
+        let icon_gap = state.settings.icon_spacing();
         let layout_box = gtk::Box::new(Orientation::Horizontal, icon_gap);
         layout_box.set_vexpand(true);
         layout_box.set_margin_start(4);
@@ -80,7 +85,7 @@ impl WindowButton {
 
         let title_label = gtk::Label::new(None);
         title_label.set_hexpand(true);
-        let truncate_titles = state.settings().truncate_titles();
+        let truncate_titles = state.settings.truncate_titles();
         if truncate_titles {
             title_label.set_ellipsize(EllipsizeMode::End);
         } else {
@@ -93,6 +98,9 @@ impl WindowButton {
         title_label.set_attributes(Some(&attrs));
 
         let indicator_color: Rc<Cell<Option<IndicatorColor>>> = Rc::new(Cell::new(None));
+        let bubble_urgency: Rc<Cell<NotificationUrgency>> =
+            Rc::new(Cell::new(NotificationUrgency::default()));
+        let notification_bubble = create_notification_bubble(bubble_urgency.clone());
 
         let event_box = gtk::EventBox::new();
         event_box.set_visible_window(true);
@@ -117,7 +125,7 @@ impl WindowButton {
         let app_id = window.app_id.clone();
         let icon_location = app_id
             .as_deref()
-            .and_then(|id| state_clone.icon_resolver().resolve(id));
+            .and_then(|id| state_clone.icon_resolver.resolve(id));
 
         let audio_label = gtk::Label::new(None);
         audio_label.show();
@@ -145,7 +153,10 @@ impl WindowButton {
             tooltip_timeout: Rc::new(RefCell::new(None)),
             skip_clicked: Rc::new(RefCell::new(false)),
             indicator_color,
-            is_urgent: Cell::new(false),
+            window_urgency: Cell::new(false),
+            notification_urgency: Cell::new(false),
+            notification_bubble,
+            bubble_urgency,
         };
 
         button.setup_click_handlers(window.id);
@@ -159,10 +170,13 @@ impl WindowButton {
             &button.audio_visible,
             IconRenderingParams {
                 display_titles: button.display_titles,
-                icon_size: state.settings().icon_size(),
+                icon_size: state.settings.icon_size(),
                 icon_path: icon_location,
             },
         );
+        button
+            .layout_box
+            .pack_end(&button.notification_bubble, false, false, 0);
         button.setup_tooltip();
 
         button
@@ -170,11 +184,15 @@ impl WindowButton {
 
     #[tracing::instrument(level = "TRACE")]
     pub fn update_focus(&self, is_focused: bool) {
+        if is_focused {
+            clear_notification_urgent(&self.notification_bubble, &self.notification_urgency);
+        }
+        let colors = *self.state.border_colors.lock().unwrap();
         update_focus(
             &self.indicator_color,
             &self.event_box,
-            &self.state.border_colors(),
-            self.is_urgent.get(),
+            &colors,
+            self.window_urgency.get(),
             &self.focused_window,
             self.window_id,
             is_focused,
@@ -182,22 +200,23 @@ impl WindowButton {
     }
 
     #[tracing::instrument(level = "TRACE")]
-    pub fn mark_urgent(&self) {
-        mark_urgent(
-            &self.indicator_color,
-            &self.event_box,
-            &self.state.border_colors(),
-            &self.is_urgent,
+    pub fn mark_notification_urgent(&self, urgency: NotificationUrgency) {
+        mark_notification_urgent(
+            &self.notification_bubble,
+            &self.notification_urgency,
+            &self.bubble_urgency,
+            urgency,
         );
     }
 
     #[tracing::instrument(level = "TRACE")]
-    pub fn update_urgent(&self, urgent: bool) {
-        update_urgent(
+    pub fn update_window_urgency(&self, urgent: bool) {
+        let colors = *self.state.border_colors.lock().unwrap();
+        update_window_urgency(
             &self.indicator_color,
             &self.event_box,
-            &self.state.border_colors(),
-            &self.is_urgent,
+            &colors,
+            &self.window_urgency,
             urgent,
         );
     }
@@ -224,7 +243,10 @@ impl WindowButton {
             tooltip_timeout: self.tooltip_timeout.clone(),
             skip_clicked: self.skip_clicked.clone(),
             indicator_color: self.indicator_color.clone(),
-            is_urgent: Cell::new(self.is_urgent.get()),
+            window_urgency: Cell::new(self.window_urgency.get()),
+            notification_urgency: Cell::new(self.notification_urgency.get()),
+            notification_bubble: self.notification_bubble.clone(),
+            bubble_urgency: self.bubble_urgency.clone(),
         }
     }
 
@@ -232,19 +254,19 @@ impl WindowButton {
         update_audio_state(
             &self.audio_event_box,
             &self.audio_label,
-            self.state.settings().audio_indicator(),
+            self.state.settings.audio_indicator(),
             status,
         );
     }
 
-    #[tracing::instrument(level = "INFO")]
+    #[tracing::instrument(level = "TRACE")]
     pub fn update_title(&self, title: Option<&str>) {
         update_title(
             &self.title_label,
             &self.title,
             self.window_id,
             self.app_id.as_deref(),
-            self.state.settings(),
+            &self.state.settings,
             self.display_titles,
             title,
         );
@@ -256,7 +278,7 @@ impl WindowButton {
             &self.title_label,
             &self.title,
             self.app_id.as_deref(),
-            self.state.settings(),
+            &self.state.settings,
             self.display_titles,
             cwd,
             command,

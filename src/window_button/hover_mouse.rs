@@ -1,19 +1,21 @@
-use std::ptr::null;
-use std::time::Duration;
+use std::{ptr::null, time::Duration};
 
-use waybar_cffi::gtk::ffi::gtk_widget_override_background_color;
-use waybar_cffi::gtk::glib::timeout_add_local_once;
-use waybar_cffi::gtk::glib::translate::{IntoGlib, ToGlibPtr};
-use waybar_cffi::gtk::glib::Propagation;
-use waybar_cffi::gtk::prelude::{Cast, IsA, WidgetExt};
-use waybar_cffi::gtk::{self as gtk, gdk, StateFlags};
+use waybar_cffi::gtk::{
+    self as gtk,
+    ffi::gtk_widget_override_background_color,
+    gdk,
+    glib::{
+        timeout_add_local_once,
+        translate::{IntoGlib, ToGlibPtr},
+        Propagation,
+    },
+    prelude::{Cast, IsA, WidgetExt},
+    StateFlags,
+};
 
 use super::WindowButton;
 
-pub fn set_background_color(
-    widget: &impl IsA<gtk::Widget>,
-    color: Option<&gdk::RGBA>,
-) {
+pub fn set_background_color(widget: &impl IsA<gtk::Widget>, color: Option<&gdk::RGBA>) {
     unsafe {
         gtk_widget_override_background_color(
             Cast::upcast_ref::<gtk::Widget>(widget.as_ref())
@@ -41,11 +43,11 @@ impl WindowButton {
     }
 
     pub(crate) fn setup_tooltip(&self) {
-        if !self.state.settings().show_tooltip() {
+        if !self.state.settings.show_tooltip() {
             return;
         }
 
-        let delay = self.state.settings().tooltip_delay();
+        let delay = self.state.settings.tooltip_delay();
         let title = self.title.clone();
         let tooltip_timeout = self.tooltip_timeout.clone();
 
@@ -54,16 +56,14 @@ impl WindowButton {
             let btn_clone = btn.clone();
             let timeout_ref = tooltip_timeout.clone();
 
-            let source_id = timeout_add_local_once(
-                Duration::from_millis(u64::from(delay)),
-                move || {
+            let source_id =
+                timeout_add_local_once(Duration::from_millis(u64::from(delay)), move || {
                     if let Some(ref text) = *title_clone.borrow() {
                         btn_clone.set_tooltip_text(Some(text));
                         btn_clone.trigger_tooltip_query();
                     }
                     timeout_ref.borrow_mut().take();
-                },
-            );
+                });
 
             *tooltip_timeout.borrow_mut() = Some(source_id);
             Propagation::Proceed

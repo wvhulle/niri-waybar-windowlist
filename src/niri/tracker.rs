@@ -187,10 +187,10 @@ impl WindowTracker {
         active_window_id: Option<u64>,
         filter_workspace: bool,
     ) -> Vec<CompositorEvent> {
-        tracing::info!(
-            "workspace {} active window changed to {:?}",
+        tracing::debug!(
             workspace_id,
-            active_window_id
+            ?active_window_id,
+            "workspace active window changed"
         );
         if let Some(Ready {
             active_per_workspace,
@@ -202,7 +202,6 @@ impl WindowTracker {
             } else {
                 active_per_workspace.remove(&workspace_id);
             }
-            tracing::info!("active window map: {:?}", active_per_workspace);
         }
         self.maybe_full_snapshot(filter_workspace)
     }
@@ -295,11 +294,11 @@ impl WindowTracker {
             .map(|pair| {
                 let mut window_copy = pair.window.clone();
                 if !window_copy.is_focused && Some(window_copy.id) == highlight_window {
-                    tracing::info!("highlighting window {}", window_copy.id);
+                    tracing::debug!(window_id = window_copy.id, "highlighting window");
                     window_copy.is_focused = true;
                 }
                 WindowInfo {
-                    inner: window_copy,
+                    window: window_copy,
                     output_name: pair.workspace.output.clone(),
                 }
             })
@@ -409,21 +408,6 @@ impl WindowTracker {
                 })
                 .then_with(|| a.window.id.cmp(&b.window.id))
         });
-
-        for pair in pairs.iter() {
-            let pos = pair
-                .window
-                .layout
-                .pos_in_scrolling_layout
-                .or_else(|| position_map.get(&pair.window.id).copied());
-            tracing::debug!(
-                window_id = pair.window.id,
-                app_id = ?pair.window.app_id,
-                workspace_idx = pair.workspace.idx,
-                pos = ?pos,
-                "snapshot order"
-            );
-        }
     }
 
     fn determine_highlight(
@@ -455,13 +439,7 @@ impl WindowTracker {
                 })
         };
 
-        tracing::info!(
-            "snapshot: active_ws={:?}, overview={:?}, last_focused={:?}, highlight={:?}",
-            active_workspace,
-            overview_active,
-            last_focused_per_workspace,
-            highlight_window
-        );
+        tracing::debug!(?highlight_window, "snapshot highlight resolved");
 
         highlight_window
     }

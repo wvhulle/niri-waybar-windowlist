@@ -1,5 +1,4 @@
-use std::cell::Cell;
-use std::rc::Rc;
+use std::{cell::Cell, rc::Rc};
 
 use waybar_cffi::gtk::{self as gtk, cairo::LinearGradient, glib::Propagation, prelude::WidgetExt};
 
@@ -20,13 +19,7 @@ pub fn setup_border_indicator(
                 }
                 IndicatorColor::Gradient { from, to } => {
                     let gradient = LinearGradient::new(0.0, 0.0, w, 0.0);
-                    gradient.add_color_stop_rgba(
-                        0.0,
-                        to.red(),
-                        to.green(),
-                        to.blue(),
-                        to.alpha(),
-                    );
+                    gradient.add_color_stop_rgba(0.0, to.red(), to.green(), to.blue(), to.alpha());
                     gradient.add_color_stop_rgba(
                         0.5,
                         from.red(),
@@ -34,13 +27,7 @@ pub fn setup_border_indicator(
                         from.blue(),
                         from.alpha(),
                     );
-                    gradient.add_color_stop_rgba(
-                        1.0,
-                        to.red(),
-                        to.green(),
-                        to.blue(),
-                        to.alpha(),
-                    );
+                    gradient.add_color_stop_rgba(1.0, to.red(), to.green(), to.blue(), to.alpha());
                     cr.set_source(&gradient).ok();
                 }
             }
@@ -71,26 +58,16 @@ pub fn update_focus(
     event_box.queue_draw();
 }
 
-pub fn mark_urgent(
+pub fn update_window_urgency(
     indicator_color: &Rc<Cell<Option<IndicatorColor>>>,
     event_box: &gtk::EventBox,
     border_colors: &BorderColors,
-    is_urgent: &Cell<bool>,
-) {
-    is_urgent.set(true);
-    indicator_color.set(Some(border_colors.urgent));
-    event_box.queue_draw();
-}
-
-pub fn update_urgent(
-    indicator_color: &Rc<Cell<Option<IndicatorColor>>>,
-    event_box: &gtk::EventBox,
-    border_colors: &BorderColors,
-    is_urgent: &Cell<bool>,
+    window_urgency: &Cell<bool>,
     urgent: bool,
 ) {
-    is_urgent.set(urgent);
+    window_urgency.set(urgent);
     if urgent {
-        mark_urgent(indicator_color, event_box, border_colors, is_urgent);
+        indicator_color.set(Some(border_colors.urgent));
+        event_box.queue_draw();
     }
 }

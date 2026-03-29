@@ -1,7 +1,6 @@
 use waybar_cffi::gtk::gdk;
 
-use super::WindowButton;
-use super::settings::ModifierKey;
+use super::{settings::ModifierKey, WindowButton};
 use crate::right_click_menu::entry_generation;
 
 impl WindowButton {
@@ -16,10 +15,7 @@ impl WindowButton {
     }
 
     pub(crate) fn display_multi_select_menu(&self) {
-        entry_generation::display_multi_select_menu(
-            &self.state,
-            &self.selection,
-        );
+        entry_generation::display_multi_select_menu(&self.state, &self.selection);
     }
 
     pub(crate) fn check_modifier_from_event(

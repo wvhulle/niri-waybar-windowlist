@@ -83,12 +83,15 @@ pub fn start() -> (AudioMonitor, impl Stream<Item = AudioState>) {
 }
 
 pub(crate) async fn forward_events(
-    tx: async_channel::Sender<crate::EventMessage>,
+    tx: async_channel::Sender<crate::waybar_module::EventMessage>,
     stream: impl Stream<Item = AudioState>,
 ) {
     let mut stream = Box::pin(stream);
     while let Some(state) = stream.next().await {
-        if let Err(e) = tx.send(crate::EventMessage::AudioUpdate(state)).await {
+        if let Err(e) = tx
+            .send(crate::waybar_module::EventMessage::AudioUpdate(state))
+            .await
+        {
             tracing::error!(%e, "failed to forward audio update");
         }
     }
@@ -214,7 +217,7 @@ async fn run_monitor(tx: Sender<AudioState>) -> Result<(), zbus::Error> {
             let bus_name = BusName::from(name.clone());
             match query_player_properties(&connection, &bus_name).await {
                 Ok((status, desktop_entry)) => {
-                    tracing::info!(%name, ?status, ?desktop_entry, "found existing MPRIS player");
+                    tracing::debug!(%name, ?status, ?desktop_entry, "found existing MPRIS player");
                     let owned: OwnedBusName = BusName::from(name.clone()).into();
                     players.insert(
                         owned,
@@ -299,7 +302,7 @@ async fn handle_name_changed(
             return;
         };
         if players.remove(&bus_name).is_some() {
-            tracing::info!(%name, "MPRIS player disappeared");
+            tracing::debug!(%name, "MPRIS player disappeared");
             send_state(players, tx);
         }
     } else if old_owner.is_empty() {
@@ -308,7 +311,7 @@ async fn handle_name_changed(
         };
         match query_player_properties(connection, &bus_name_ref).await {
             Ok((status, desktop_entry)) => {
-                tracing::info!(%name, ?status, ?desktop_entry, "MPRIS player appeared");
+                tracing::debug!(%name, ?status, ?desktop_entry, "MPRIS player appeared");
                 let Ok(bus_name): Result<OwnedBusName, _> = name.try_into() else {
                     return;
                 };

@@ -1,8 +1,4 @@
-use std::{
-    cell::RefCell,
-    rc::Rc,
-    time::Duration,
-};
+use std::{cell::RefCell, rc::Rc, time::Duration};
 
 use waybar_cffi::gtk::{
     self as gtk,
@@ -16,7 +12,7 @@ use crate::window_button::{hover_mouse::set_background_color, WindowButton};
 
 impl WindowButton {
     pub(crate) fn setup_drag_reorder(&self) {
-        tracing::info!("configuring drag-drop for window {}", self.window_id);
+        tracing::debug!(window_id = self.window_id, "configuring drag-drop");
 
         let initial_position = Rc::new(RefCell::new(0));
         self.setup_drag_source(initial_position.clone());
@@ -35,13 +31,10 @@ impl WindowButton {
         let pos_for_begin = initial_position;
 
         self.event_box.connect_drag_begin(move |widget, _| {
-            tracing::info!("drag initiated");
-
             if let Some(parent) = widget.parent() {
                 if let Ok(container) = parent.downcast::<gtk::Box>() {
                     let position = container.child_position(widget);
                     *pos_for_begin.borrow_mut() = position;
-                    tracing::info!("stored initial position: {}", position);
                 }
             }
 
@@ -58,7 +51,6 @@ impl WindowButton {
         let button_for_end = self.event_box.clone();
         let skip_clicked_drag = self.skip_clicked.clone();
         self.event_box.connect_drag_end(move |_, _| {
-            tracing::info!("drag completed");
             set_background_color(&button_for_end, None);
             *skip_clicked_drag.borrow_mut() = false;
         });
@@ -83,10 +75,7 @@ impl WindowButton {
         self.setup_drag_drop(initial_position, hover_timeout);
     }
 
-    fn setup_drag_motion_and_leave(
-        &self,
-        hover_timeout: Rc<RefCell<Option<SourceId>>>,
-    ) {
+    fn setup_drag_motion_and_leave(&self, hover_timeout: Rc<RefCell<Option<SourceId>>>) {
         let timeout_for_motion = hover_timeout.clone();
         let timeout_for_leave = hover_timeout;
 
@@ -98,7 +87,7 @@ impl WindowButton {
                 let is_external = ctx.drag_get_source_widget().is_none();
 
                 if is_external {
-                    if state_for_motion.settings().drag_hover_focus()
+                    if state_for_motion.settings.drag_hover_focus()
                         && timeout_for_motion.borrow().is_none()
                     {
                         let drag_over_bg = RGBA::new(0.5, 0.7, 1.0, 0.3);
@@ -106,14 +95,14 @@ impl WindowButton {
 
                         let state = state_for_motion.clone();
                         let wid = window_id_for_motion;
-                        let delay = state_for_motion.settings().drag_hover_focus_delay();
+                        let delay = state_for_motion.settings.drag_hover_focus_delay();
                         let timeout_ref = timeout_for_motion.clone();
 
                         let source_id = timeout_add_local_once(
                             Duration::from_millis(u64::from(delay)),
                             move || {
                                 tracing::debug!("drag hover focus triggered for window {}", wid);
-                                if let Err(e) = state.compositor().focus_window(wid) {
+                                if let Err(e) = state.compositor.focus_window(wid) {
                                     tracing::error!("failed to focus window on drag hover: {}", e);
                                 }
                                 timeout_ref.borrow_mut().take();
@@ -166,7 +155,7 @@ impl WindowButton {
 
         let state_for_drop = self.state.clone();
         let pos_for_drop = initial_position;
-        let settings_for_drop = self.state.settings().clone();
+        let settings_for_drop = self.state.settings.clone();
         self.event_box
             .connect_drag_drop(move |widget, ctx, _x, _y, time| {
                 if let Some(timeout_id) = timeout_for_drop.borrow_mut().take() {
@@ -189,8 +178,6 @@ impl WindowButton {
         let state = state_for_drop;
         self.event_box
             .connect_drag_data_received(move |_widget, ctx, _, _, data, _, time| {
-                tracing::info!("drop received");
-
                 if let Some(text) = data.text() {
                     if let Ok(dragged_window_id) = text.parse::<u64>() {
                         if let Some(source) = ctx.drag_get_source_widget() {
@@ -203,21 +190,20 @@ impl WindowButton {
                                     let keep_stacked = Self::check_modifier_static(
                                         settings_for_drop.multi_select_modifier(),
                                     );
-                                    tracing::info!(
-                                        "position change: {} -> {} (delta: {}, keep_stacked: {})",
+                                    tracing::debug!(
                                         start_pos,
                                         end_pos,
                                         delta,
-                                        keep_stacked
+                                        keep_stacked,
+                                        "drag reposition"
                                     );
 
-                                    match state.compositor().reposition_window(
+                                    match state.compositor.reposition_window(
                                         dragged_window_id,
                                         delta,
                                         keep_stacked,
                                     ) {
                                         Ok(()) => {
-                                            tracing::info!("reposition successful");
                                             ctx.drag_finish(true, false, time);
                                             return;
                                         }

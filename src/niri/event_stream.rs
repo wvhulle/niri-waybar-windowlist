@@ -1,12 +1,10 @@
-use std::io::ErrorKind;
-use std::thread;
-use std::time::Duration;
+use std::{io::ErrorKind, thread, time::Duration};
 
 use async_channel::{Receiver, Sender};
 use niri_ipc::{Event, Request};
 
 use super::{connect_socket, tracker::WindowTracker, validate_handled, WindowSnapshot};
-use crate::{CompositorIpcError, EventMessage};
+use crate::{niri::CompositorIpcError, waybar_module::EventMessage};
 
 pub enum CompositorEvent {
     FullSnapshot(WindowSnapshot),
@@ -43,9 +41,7 @@ pub(crate) async fn forward_events(
     while let Some(event) = stream.next().await {
         let msg = match event {
             CompositorEvent::FullSnapshot(snapshot) => EventMessage::FullSnapshot(snapshot),
-            CompositorEvent::FocusChanged { old, new } => {
-                EventMessage::FocusChanged { old, new }
-            }
+            CompositorEvent::FocusChanged { old, new } => EventMessage::FocusChanged { old, new },
             CompositorEvent::Workspaces => EventMessage::Workspaces(()),
             CompositorEvent::ConfigReloaded => EventMessage::ConfigReloaded,
         };
