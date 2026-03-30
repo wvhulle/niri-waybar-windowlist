@@ -1,1 +1,3 @@
-pub mod style;
+mod style;
+
+pub use style::Indicator;

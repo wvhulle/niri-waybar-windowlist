@@ -366,8 +366,7 @@ impl ModuleInstance {
                 btn
             });
 
-            button.update_focus(window.is_focused);
-            button.update_window_urgency(window.is_urgent);
+            button.update_focus(window.is_focused, window.is_urgent);
             button.update_title(window.title.as_deref());
 
             removed_windows.remove(&window.id);
@@ -398,13 +397,13 @@ impl ModuleInstance {
 
         if let Some(old_id) = old {
             if let Some(button) = self.buttons.get(&old_id) {
-                button.update_focus(false);
+                button.update_focus(false, false);
             }
         }
 
         if let Some(new_id) = new {
             if let Some(button) = self.buttons.get(&new_id) {
-                button.update_focus(true);
+                button.update_focus(true, false);
             }
         }
 

@@ -1,5 +1,5 @@
 use std::{
-    cell::{Cell, RefCell},
+    cell::RefCell,
     collections::hash_map::Entry,
     process::Command,
     rc::Rc,
@@ -20,8 +20,8 @@ use super::{
     WindowButton,
 };
 use crate::{
-    niri::border_colors::IndicatorColor,
-    window_list::{clear_selection, FocusedWindow},
+    focus_urgent_indicator::Indicator,
+    window_list::clear_selection,
     SharedState,
 };
 
@@ -38,8 +38,7 @@ impl WindowButton {
         let app_id_release = self.app_id.clone();
         let title_release = self.title.clone();
         let selection_release = self.selection.clone();
-        let focused_release = self.focused_window.clone();
-        let indicator_color_release = self.indicator_color.clone();
+        let indicator_release = self.indicator.clone();
         let last_click_release = Rc::new(RefCell::new(
             Instant::now().checked_sub(Duration::from_secs(1)).unwrap(),
         ));
@@ -52,7 +51,7 @@ impl WindowButton {
                         return Propagation::Stop;
                     }
 
-                    let is_currently_focused = focused_release.get() == Some(window_id);
+                    let is_currently_focused = indicator_release.is_focused();
                     let app_id_ref = app_id_release.as_deref();
                     let title_ref = title_release.borrow();
                     let title_str = title_ref.as_deref();
@@ -91,9 +90,7 @@ impl WindowButton {
                         clear_selection(&selection_release);
                         Self::optimistic_focus(
                             btn,
-                            window_id,
-                            &focused_release,
-                            &indicator_color_release,
+                            &indicator_release,
                             &state_release,
                         );
                         execute_click_action(
@@ -118,8 +115,7 @@ impl WindowButton {
         let title_press = self.title.clone();
         let selection_press = self.selection.clone();
         let menu_self = self.clone_for_menu();
-        let focused_press = self.focused_window.clone();
-        let indicator_color_press = self.indicator_color.clone();
+        let indicator_press = self.indicator.clone();
         let skip_press = self.skip_clicked.clone();
         let selected_bg = gdk::RGBA::new(0.5, 0.5, 0.5, 0.3);
 
@@ -140,16 +136,12 @@ impl WindowButton {
                             sel.remove(&window_id);
                             set_background_color(&event_box_press, None);
                         }
-                    } else {
-                        let is_currently_focused = focused_press.get() == Some(window_id);
-                        if !is_currently_focused {
+                    } else if !indicator_press.is_focused() {
                             *skip_press.borrow_mut() = true;
                             clear_selection(&selection_press);
                             Self::optimistic_focus(
                                 btn,
-                                window_id,
-                                &focused_press,
-                                &indicator_color_press,
+                                &indicator_press,
                                 &state_press,
                             );
                             let app_id_ref = app_id_press.as_deref();
@@ -165,12 +157,11 @@ impl WindowButton {
                                 app_id_ref,
                                 title_str,
                             );
-                        }
                     }
                     Propagation::Proceed
                 }
                 2 => {
-                    let is_focused = focused_press.get() == Some(window_id);
+                    let is_focused = indicator_press.is_focused();
                     execute_or_show_menu(
                         &menu_self,
                         &state_press,
@@ -189,7 +180,7 @@ impl WindowButton {
                 }
                 3 => {
                     if selection_press.borrow().is_empty() {
-                        let is_focused = focused_press.get() == Some(window_id);
+                        let is_focused = indicator_press.is_focused();
                         execute_or_show_menu(
                             &menu_self,
                             &state_press,
@@ -255,9 +246,7 @@ impl WindowButton {
 
     pub(crate) fn optimistic_focus(
         btn: &gtk::EventBox,
-        window_id: u64,
-        focused_window: &FocusedWindow,
-        indicator_color: &Rc<Cell<Option<IndicatorColor>>>,
+        indicator: &Indicator,
         state: &SharedState,
     ) {
         if let Some(parent) = btn.parent() {
@@ -271,9 +260,7 @@ impl WindowButton {
         }
 
         let colors = *state.border_colors.lock().unwrap();
-        indicator_color.set(Some(colors.active));
-        btn.queue_draw();
-        focused_window.set(Some(window_id));
+        indicator.update(&colors, true, false);
     }
 }
 

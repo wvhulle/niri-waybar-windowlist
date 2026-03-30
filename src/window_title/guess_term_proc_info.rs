@@ -1,57 +1,10 @@
 use std::{path::Path, time::Duration};
 
-use futures::{io, AsyncReadExt};
 use procfs::process::Process;
 use thiserror::Error;
-use waybar_cffi::gtk::{
-    gio::{prelude::InputStreamExtManual, traits::FileExt, File},
-    glib::{self, Priority},
-};
+use waybar_cffi::gtk::glib;
 
 use crate::waybar_module::EventMessage;
-
-pub struct ProcessInfo {
-    pub parent_id: Option<i64>,
-}
-
-impl ProcessInfo {
-    #[tracing::instrument(level = "TRACE", err)]
-    pub async fn query(process_id: i64) -> Result<Self, ProcessError> {
-        let stat_file = File::for_path(format!("/proc/{process_id}/stat"));
-
-        let mut reader = stat_file
-            .read_future(Priority::DEFAULT)
-            .await
-            .map_err(|e| ProcessError::FileOpen { e, pid: process_id })?
-            .into_async_buf_read(4096);
-
-        let mut content = String::new();
-        reader
-            .read_to_string(&mut content)
-            .await
-            .map_err(|e| ProcessError::FileRead { e, pid: process_id })?;
-
-        let parent_pid_str = content
-            .split(' ')
-            .nth(3)
-            .ok_or_else(|| ProcessError::MalformedStat { pid: process_id })?;
-
-        let parent_pid = parent_pid_str
-            .parse()
-            .map_err(|_| ProcessError::InvalidPpid {
-                value: parent_pid_str.to_owned(),
-                pid: process_id,
-            })?;
-
-        Ok(Self {
-            parent_id: if parent_pid == 0 {
-                None
-            } else {
-                Some(parent_pid)
-            },
-        })
-    }
-}
 
 pub struct ForegroundProcessInfo {
     pub cwd: Option<String>,
@@ -136,29 +89,6 @@ fn find_process_in_group(pid: i32, target_pgrp: i32) -> Option<i32> {
             .map(|_| child_pid)
             .or_else(|| find_process_in_group(child_pid, target_pgrp))
     })
-}
-
-#[derive(Error, Debug)]
-pub enum ProcessError {
-    #[error("malformed /proc/{pid}/stat: missing fields")]
-    MalformedStat { pid: i64 },
-
-    #[error("invalid PPID in /proc/{pid}/stat: {value}")]
-    InvalidPpid { value: String, pid: i64 },
-
-    #[error("cannot open /proc/{pid}/stat: {e}")]
-    FileOpen {
-        #[source]
-        e: glib::Error,
-        pid: i64,
-    },
-
-    #[error("cannot read /proc/{pid}/stat: {e}")]
-    FileRead {
-        #[source]
-        e: io::Error,
-        pid: i64,
-    },
 }
 
 pub(crate) async fn forward_poll_ticks(tx: async_channel::Sender<EventMessage>, interval_ms: u64) {
