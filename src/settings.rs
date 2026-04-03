@@ -28,7 +28,7 @@ pub struct Settings {
     pub log_level: LogLevel,
     click_actions: ClickActions,
     ignore_rules: Vec<IgnoreRule>,
-    context_menu: Vec<ContextMenuItem>,
+    context_menu: Vec<Vec<ContextMenuItem>>,
     multi_select_modifier: ModifierKey,
     multi_select_menu: Vec<MultiSelectMenuItem>,
     audio_indicator: AudioIndicatorConfig,
@@ -70,7 +70,7 @@ impl Default for Settings {
         Self {
             apps: HashMap::new(),
             notifications: NotificationConfig::default(),
-            icon_size: 24,
+            icon_size: 0,
             icon_spacing: 6,
             log_level: LogLevel::Info,
             click_actions: ClickActions::default(),
@@ -192,7 +192,7 @@ impl Settings {
         self.icon_spacing
     }
 
-    pub fn context_menu(&self) -> &[ContextMenuItem] {
+    pub fn context_menu(&self) -> &[Vec<ContextMenuItem>] {
         &self.context_menu
     }
 

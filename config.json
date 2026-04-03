@@ -1,0 +1,10 @@
+{
+  "layer": "top",
+  "position": "bottom",
+  "height": 40,
+  "modules-center": ["cffi/niri_window_buttons"],
+  "cffi/niri_window_buttons": {
+    "module_path": "target/debug/libniri_waybar_windowlist.so",
+    "show_window_titles": true
+  }
+}

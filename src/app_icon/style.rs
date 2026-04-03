@@ -43,14 +43,18 @@ pub fn setup_icon_rendering(
     // Load and insert the icon once the widget is realized (so scale_factor is
     // available).
     let icon_inserted = Rc::new(Cell::new(false));
-    event_box.connect_size_allocate(move |button, _allocation| {
+    event_box.connect_size_allocate(move |button, allocation| {
         if icon_inserted.get() {
             return;
         }
         icon_inserted.set(true);
-        tracing::debug!("icon insertion triggered for size_allocate (one-time)");
 
-        let dimension = icon_size;
+        let dimension = if icon_size > 0 {
+            icon_size
+        } else {
+            allocation.height()
+        };
+        tracing::debug!(dimension, "icon insertion triggered for size_allocate");
 
         let icon_image =
             load_icon_image(icon_path.as_ref(), button, dimension).unwrap_or_else(|| {

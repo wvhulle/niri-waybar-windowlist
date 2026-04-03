@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use niri_ipc::{Action, Output, Request};
+use niri_ipc::{Action, Output, Request, Workspace, WorkspaceReferenceArg};
 
 use super::{event_stream::NiriEventStream, send_request, validate_handled, CompositorIpcError};
 use crate::settings::Settings;
@@ -278,6 +278,29 @@ impl CompositorClient {
         self.focus_window(window_id)?;
         let response = send_request(Request::Action(Action::MoveColumnRightOrToMonitorRight {}))?;
         validate_handled(response)
+    }
+
+    #[tracing::instrument(level = "TRACE", err)]
+    pub fn move_window_to_workspace(
+        &self,
+        window_id: u64,
+        reference: WorkspaceReferenceArg,
+    ) -> Result<(), CompositorIpcError> {
+        let response = send_request(Request::Action(Action::MoveWindowToWorkspace {
+            window_id: Some(window_id),
+            reference,
+            focus: false,
+        }))?;
+        validate_handled(response)
+    }
+
+    pub fn query_workspaces() -> Result<Vec<Workspace>, CompositorIpcError> {
+        let response = send_request(Request::Workspaces)?;
+        match response {
+            Ok(niri_ipc::Response::Workspaces(workspaces)) => Ok(workspaces),
+            Ok(other) => Err(CompositorIpcError::unexpected_response("Workspaces", other)),
+            Err(msg) => Err(CompositorIpcError::Reply(msg)),
+        }
     }
 
     pub fn query_outputs() -> Result<HashMap<String, Output>, CompositorIpcError> {

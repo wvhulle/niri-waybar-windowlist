@@ -76,8 +76,6 @@ impl WindowButton {
         layout_box.set_vexpand(true);
         layout_box.set_margin_start(4);
         layout_box.set_margin_end(4);
-        layout_box.set_margin_top(4);
-        layout_box.set_margin_bottom(0);
 
         let title_label = gtk::Label::new(None);
         title_label.set_hexpand(true);
