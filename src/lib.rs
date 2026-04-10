@@ -37,7 +37,13 @@ fn init_logging(level: &settings::LogLevel) {
     });
 }
 
-struct WindowButtonsModule;
+struct WindowButtonsModule {
+    /// Dropping this sender closes the shutdown channel, causing the spawned
+    /// async event-loop task to exit. Without this, the task outlives the C++
+    /// module object and dereferences a dangling `WaybarUpdater` pointer on the
+    /// next niri event → SIGSEGV.
+    _shutdown: async_channel::Sender<()>,
+}
 
 impl Module for WindowButtonsModule {
     type Config = settings::Settings;
@@ -46,9 +52,9 @@ impl Module for WindowButtonsModule {
         init_logging(&settings.log_level);
 
         let updater = waybar_module::WaybarUpdater::from_init_info(info);
-        waybar_module::initialize_module(info, settings, updater);
+        let shutdown = waybar_module::initialize_module(info, settings, updater);
 
-        Self
+        Self { _shutdown: shutdown }
     }
 }
 

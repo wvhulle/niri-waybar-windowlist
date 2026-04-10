@@ -82,7 +82,7 @@ pub(crate) fn initialize_module(
     info: &waybar_cffi::InitInfo,
     settings: Settings,
     updater: WaybarUpdater,
-) {
+) -> async_channel::Sender<()> {
     let state = create_shared_state(settings);
     let root = info.get_root_widget();
 
@@ -92,12 +92,24 @@ pub(crate) fn initialize_module(
 
     root.add(&container);
 
+    let (shutdown_tx, shutdown_rx) = async_channel::bounded::<()>(1);
+
     let context = MainContext::default();
     context.spawn_local(async move {
-        ModuleInstance::create(state, container, updater)
-            .run_event_loop()
-            .await;
+        let mut instance = ModuleInstance::create(state, container, updater);
+        // Race the event loop against the shutdown signal.  When the module is
+        // destroyed (wbcffi_deinit drops WindowButtonsModule), the last
+        // shutdown_tx is dropped, shutdown_rx.recv() resolves immediately, and
+        // select picks it — causing the task to exit before it can touch the
+        // now-freed WaybarUpdater pointer.
+        futures::future::select(
+            std::pin::pin!(instance.run_event_loop()),
+            std::pin::pin!(shutdown_rx.recv()),
+        )
+        .await;
     });
+
+    shutdown_tx
 }
 
 // ── Event message ──
