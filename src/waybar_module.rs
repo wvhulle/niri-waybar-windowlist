@@ -85,6 +85,7 @@ pub(crate) fn initialize_module(
 ) -> async_channel::Sender<()> {
     let state = create_shared_state(settings);
     let root = info.get_root_widget();
+    root.set_widget_name("niri-waybar-windowlist");
 
     let container = gtk::Box::new(Orientation::Horizontal, 0);
     container.set_vexpand(true);
