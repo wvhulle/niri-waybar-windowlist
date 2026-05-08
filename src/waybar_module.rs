@@ -93,11 +93,18 @@ pub(crate) fn initialize_module(
 
     root.add(&container);
 
+    // Start hidden so the bar's central area collapses until the first window
+    // appears. set_no_show_all keeps a recursive show_all from the bar parent
+    // from undoing this; the event loop calls show() once buttons exist.
+    root.set_no_show_all(true);
+    root.hide();
+    let root_owned: gtk::Container = (*root).clone();
+
     let (shutdown_tx, shutdown_rx) = async_channel::bounded::<()>(1);
 
     let context = MainContext::default();
     context.spawn_local(async move {
-        let mut instance = ModuleInstance::create(state, container, updater);
+        let mut instance = ModuleInstance::create(state, container, root_owned, updater);
         // Race the event loop against the shutdown signal.  When the module is
         // destroyed (wbcffi_deinit drops WindowButtonsModule), the last
         // shutdown_tx is dropped, shutdown_rx.recv() resolves immediately, and
@@ -171,6 +178,7 @@ fn create_event_stream(
 pub(crate) struct ModuleInstance {
     buttons: BTreeMap<u64, WindowButton>,
     container: gtk::Box,
+    root: gtk::Container,
     previous_snapshot: Option<WindowSnapshot>,
     current_output: Option<String>,
     previous_focused: Option<u64>,
@@ -184,10 +192,16 @@ pub(crate) struct ModuleInstance {
 }
 
 impl ModuleInstance {
-    pub(crate) fn create(state: SharedState, container: gtk::Box, updater: WaybarUpdater) -> Self {
+    pub(crate) fn create(
+        state: SharedState,
+        container: gtk::Box,
+        root: gtk::Container,
+        updater: WaybarUpdater,
+    ) -> Self {
         Self {
             buttons: BTreeMap::new(),
             container,
+            root,
             previous_snapshot: None,
             current_output: None,
             previous_focused: None,
@@ -394,7 +408,12 @@ impl ModuleInstance {
             self.window_pids.remove(&window_id);
         }
 
-        self.container.show_all();
+        if self.buttons.is_empty() {
+            self.root.hide();
+        } else {
+            self.root.show();
+            self.container.show_all();
+        }
         self.updater.queue_update();
         self.previous_snapshot = Some(snapshot);
         self.update_button_audio_states();
