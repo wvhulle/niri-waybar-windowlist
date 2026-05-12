@@ -127,9 +127,34 @@ pub(crate) enum EventMessage {
     FullSnapshot(WindowSnapshot),
     FocusChanged { old: Option<u64>, new: Option<u64> },
     Workspaces(()),
+    MonitorsChanged,
     AudioUpdate(AudioState),
     ProcessInfoTick,
     ConfigReloaded,
+}
+
+fn forward_monitor_changes(tx: &async_channel::Sender<EventMessage>) {
+    use waybar_cffi::gtk::gdk;
+
+    let Some(display) = gdk::Display::default() else {
+        tracing::warn!("no default GDK display; monitor hotplug updates disabled");
+        return;
+    };
+
+    let notify = {
+        let tx = tx.clone();
+        move || {
+            if let Err(e) = tx.try_send(EventMessage::MonitorsChanged) {
+                tracing::warn!(%e, "failed to queue monitor change");
+            }
+        }
+    };
+
+    display.connect_monitor_added({
+        let notify = notify.clone();
+        move |_, _| notify()
+    });
+    display.connect_monitor_removed(move |_, _| notify());
 }
 
 fn create_event_stream(
@@ -157,6 +182,8 @@ fn create_event_stream(
     } else {
         tracing::info!("proc polling disabled (no poll_proc rules)");
     }
+
+    forward_monitor_changes(&tx);
 
     glib::spawn_future_local(event_stream::forward_events(
         tx,
@@ -240,25 +267,30 @@ impl ModuleInstance {
                         .values()
                         .for_each(|button| button.get_widget().queue_draw());
                 }
-                EventMessage::Workspaces(()) => {
-                    let updated_filter = self.determine_display_filter().await;
-                    let filter_changed = {
-                        let Ok(mut filter_lock) = display_filter.lock() else {
-                            tracing::warn!("display filter lock poisoned");
-                            continue;
-                        };
-                        let changed = *filter_lock != updated_filter;
-                        *filter_lock = updated_filter;
-                        changed
-                    };
-
-                    if filter_changed && self.update_output_and_resize() {
-                        if let Some(snapshot) = self.previous_snapshot.clone() {
-                            let filter = Arc::new(Mutex::new(DisplayFilter::ShowAll));
-                            self.handle_window_update(snapshot, filter).await;
-                        }
-                    }
+                EventMessage::Workspaces(()) | EventMessage::MonitorsChanged => {
+                    self.reevaluate_display_filter(&display_filter).await;
                 }
+            }
+        }
+    }
+
+    async fn reevaluate_display_filter(&mut self, display_filter: &Arc<Mutex<DisplayFilter>>) {
+        let updated_filter = self.determine_display_filter().await;
+        let filter_changed = {
+            let Ok(mut filter_lock) = display_filter.lock() else {
+                tracing::warn!("display filter lock poisoned");
+                return;
+            };
+            let changed = *filter_lock != updated_filter;
+            *filter_lock = updated_filter;
+            changed
+        };
+
+        let output_changed = self.update_output_and_resize();
+        if filter_changed || output_changed {
+            if let Some(snapshot) = self.previous_snapshot.clone() {
+                self.handle_window_update(snapshot, display_filter.clone())
+                    .await;
             }
         }
     }
